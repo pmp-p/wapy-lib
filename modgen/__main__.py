@@ -16,53 +16,50 @@ from . import *
 
 USER_C_MODULES = os.environ.get('USER_C_MODULES','cmod')
 
-for pym in glob.glob( os.path.join(USER_C_MODULES,'*.pym')):
 
-    clines=["""/* http://github.com/pmp-p */"""]
+for pym in glob.glob( os.path.join(USER_C_MODULES,'*.pym')):
 
     namespace = os.path.basename(pym)[:-4]
 
     with open(pym,'r') as source:
-        pylines, codemap, cbodies = py2c( namespace, source, clines)
+
+        # will will convert code to scopes tree, and will yield anything before first class/def
+        # using single line C comment style (//) for python comments style (#)
+
+        headlines = ["""/* http://github.com/pmp-p  target pym:%s */""" % pym ]
+        for line in py2x( namespace,  sys.argv[0], source):
+
+            headlines.append( line )
+
+        print("Header : %s lines" % len(headlines) )
+
+        if 0:
+            print(f"Begin:====================== py2py [{pym}] ========================")
+
+            for pyline in to_py():
+                pass
+                #print(pyline)
+
+            code = '\n'.join(pylines)
+            try:
+                bytecode = compile( code, '<modgen>', 'exec')
+            except Exception as e:
+                print("================ %s ================" % pym)
+                print(code)
+                print("================================")
+                sys.print_exception(e, sys.stderr)
+                raise SystemExit(1)
+
+            #exec(bytecode,  __import__('__main__').__dict__, globals())
 
 
-        print(f"Begin:====================== transpiling [{pym}] ========================")
-        for l in pylines:
-            print(l)
-
-
-        code = '\n'.join(pylines)
-        try:
-            bytecode = compile( code, '<modgen>', 'exec')
-        except Exception as e:
-            print("================ %s ================" % pym)
-            print(code)
-            print("================================")
-            sys.print_exception(e, sys.stderr)
-            raise SystemExit(1)
-
-        exec(bytecode,  __import__('__main__').__dict__, globals())
-
-        cmod = module()
-        cmod.__code__ = cbodies
-
-        cmap = cify( cmod, namespace)
-
-        table = cmap.pop(-1)
-
-        print("== code map ==")
-        while len(codemap):
-            defname, prepend, append = codemap.pop()
-            if defname in cmap:
-                code,rti = cmap.pop( defname )
-                print(defname,'pre=', prepend,'post=', append, len( code) )
-                clines.insert(append, rti )
-                clines.insert(prepend, code )
-            else:
-                print("error",defname)
-
+        # create build folder, will host makefile and transpiled code
         mod_dir = f"{USER_C_MODULES}/{namespace}"
         os.makedirs(mod_dir, exist_ok=True)
+
+
+        # create the makefile
+
         with open(f"{mod_dir}/micropython.mk","w") as makefile:
             makefile.write(f"""
 {namespace.upper()}_MOD_DIR := $(USERMOD_DIR)
@@ -74,19 +71,16 @@ SRC_USERMOD += $(wildcard $({namespace.upper()}_MOD_DIR)/*.c)
 CFLAGS_USERMOD += -I$({namespace.upper()}_MOD_DIR)
 """)
 
-
+        # transpile to C
 
         ctarget = f"{mod_dir}/mod{namespace}.c"
-        print(f"End:====================== transpiled [{ctarget}] ========================")
         print()
-        print()
-        clines.append( table )
-
+        print(f"Begin:====================== py2c [{pym}] ========================")
         with open(ctarget,'w') as code:
-            for l in clines:
-                print(l, file=code)
+            for line in to_c(headlines):
+                print(line, file=code)
 
-
+        print(f"End:====================== transpiled [{ctarget}] ========================")
 
 
 sys.exit(0)

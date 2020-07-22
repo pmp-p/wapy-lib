@@ -1,12 +1,10 @@
 import sys,typing
 
-def npe():
-    print('Null Pointer Exception')
 
-void = typing.TypeVar('void')
-mp_raw_code_t = typing.TypeVar('mp_raw_code_t*')
-const_char_p = typing.TypeVar('const char*')
-mp_obj_t = typing.TypeVar('mp_obj_t*')
+# the top level class is the module singleton
+scopes = []
+flow = []
+log = []
 
 
 class empty:pass
@@ -14,232 +12,12 @@ class empty:pass
 instance = empty()
 
 
-def py2c(modname, source, clines):
-    global namespace, instance
-    header = len(clines)
-    append = 0
-    prepend = 0
-    namespace = modname
-    pylines = ["class module:"]
-
-    defs = []
-    defcount = 0
-    isdef = ''
-    defmap = []
-
-    cbody = {}
-
-
-    cls = []
-    clscount = 0
-    iscls = ''
-    clsmap = []
-    ancestor = ''
-
-    def annotation_var(l):
-        if '=' in l:
-            head, tail = l.split('=',1)
-        else:
-            head = l
-            tail = 'TODO_DEF_INIT'
-
-        head = head.replace(' ','')
-        tail = tail.strip()
-
-        vname, vtype = head.split(':')
-        return vname, vtype, tail
-
-
-
-    def end_def():
-        nonlocal isdef
-        nonlocal iscls
-        nonlocal cbody
-        nonlocal append
-
-        if isdef!='':
-            trail = []
-            while (not len(clines[-1].strip())) or (clines[-1].strip().startswith('//')):
-                trail.insert(0,clines.pop() )
-
-            if iscls:
-                # record the whole function body for instrumentation in build_as_class()
-                #cbody[isdef]['code'].append('//} end_def, generating return value\n')
-                pass
-            else:
-                clines.append('} /* end_def-nocls %s */' % isdef)
-                append = len(clines)
-                clines.extend( trail )
-                defmap.append( [ isdef, prepend,  append ] )
-                print(defmap[-1])
-            isdef = ''
-
-
-    def end_class():
-        nonlocal iscls
-        if iscls != '':
-            trail = []
-            while (not len(clines[-1].strip())) or (clines[-1].strip().startswith('//')):
-                trail.insert(0, clines.pop() )
-
-            clines.append('/* end_class %s */' % iscls)
-            append = len(clines)
-
-            clines.extend( trail )
-
-            clsmap.append( [ iscls, prepend, append ] )
-            print(clsmap[-1])
-
-            pylines.append(f"    {iscls} = {iscls}")
-
-            iscls = ''
-
-    def begin_def(defstart, pylines):
-        nonlocal iscls
-        nonlocal isdef
-        nonlocal defcount
-        nonlocal clines
-        nonlocal cbody
-        nonlocal l
-
-        if l[:defstart].find('async ')>=0:
-            tdef = 'async def'
-        else:
-            tdef = 'def'
-
-
-
-        isdef, thedef = l[defstart:-1].split('(',1)
-
-        isdef = isdef.strip()
-        thedef = thedef.strip()
-
-
-        pylines.append('')
-
-        if iscls:
-            pylines.append(f"        {tdef} {iscls}_{isdef}({thedef}: pass #{isdef}")
-            isdef = iscls + '_' + isdef
-            cbody.setdefault(isdef, { 'code' : [] , 'sync' : tdef == 'def' } )
-        else:
-            pylines.append(f"    {l} pass #{isdef}")
-        pylines.append('')
-
-
-        defcount+=1
-
-        clines.append("/* begin_def #%s@%s %s  */" % (defcount, len(clines), isdef ))
-
-        prepend = 1+len(clines)
-
-
-    for l in source.readlines():
-        l = l.rstrip()
-        ls = l.strip()
-        if len(ls) and ls[0] == "#":
-            if ls.startswith('#include '):
-                pass
-            elif ls.startswith('#define '):
-                pass
-            elif ls.startswith('#error '):
-                pass
-            elif ls.startswith('#warning '):
-                pass
-            elif ls.startswith('#pragma '):
-                pass
-            elif ls.startswith('#define '):
-                pass
-            elif ls.startswith('#if'):
-                pass
-            elif ls.startswith('#else'):
-                pass
-            elif ls.startswith('#endif'):
-                pass
-            else:
-                clines.append('//'+l[1:])
-                continue
-
-        if not len(ls):
-            clines.append("")
-            continue
-
-
-        # no support for toplevel async, we need alloc for ctx state.
-
-        if l.startswith('def ') or l.startswith('class '):
-            end_def()
-            end_class()
-
-            if l.startswith('class '):
-
-                iscls = l[6:].rsplit(':',1)[0].strip()
-
-
-                if iscls.find('(')<=0:
-                    iscls= iscls+'(object)'
-                iscls, ancestor = iscls.split('(',1)
-                ancestor = ancestor.rsplit(')')[0]
-
-
-
-                pylines.append(f"    class {iscls}:")
-                pylines.append(f"        __base__ = '{ancestor}'")
-                pylines.append(f"        __ancestor__ = '{ancestor}'")
-
-                clscount += 1
-                clines.append("/* #%s@%s %s  */" % (clscount,len(clines),l[6:-1].strip() ))
-                prepend = 1+len(clines)
-                continue
-
-            if l.startswith('def '):
-                begin_def(len('def '), pylines)
-                continue
-
-
-        if iscls=='':
-            clines.append(l)
-            continue
-
-        # we are inside a class definition => dataclasses / methods
-
-        defsize = 0
-
-        if ls.startswith('def '):
-            defsize = len('def ')
-
-        if ls.startswith('async def '):
-            defsize = len('async def ')
-
-        if defsize:
-            end_def()
-            begin_def(4+defsize, pylines)
-            continue
-
-        # a function body
-        if iscls and isdef :
-            pylines.append(f'#    {l}')
-            cbody[isdef]['code'].append(l)
-            continue
-
-        #var annotations
-        try:
-            vname, vtype, vdef = annotation_var(l)
-            pylines.append(f'        {vname}=("{vtype}", "{vdef}")')
-            clines.append(f'// {iscls} -> {vname}=("{vtype}", "{vdef}")')
-            continue
-        # var with c type as strings or raw int
-        except:
-            pylines.append(f'    {l}')
-
-    end_def()
-    end_class()
-
-
-
-    clines.insert(header, """/*
-  %(namespace)s AUTO-GENERATED by %(name)s
+def standard_c_header(**kw):
+    yield ( """/*
+  %(namespace)s.c AUTO-GENERATED by %(name)s
 */
 
+// ======= STATIC HEADER ========
 
 #include <string.h>
 #include <stdio.h>
@@ -248,33 +26,747 @@ def py2c(modname, source, clines):
 #include "py/obj.h"
 #include "py/runtime.h"
 
-static void print(mp_obj_t str) {
+#define None mp_const_none
+#define bytes(cstr) PyBytes_FromString(cstr)
+#define PyMethodDef const mp_map_elem_t
+#define PyModuleDef const mp_obj_module_t
+#define STATIC static
+
+"""  % kw )
+
+    if kw['namespace'] == 'embed':
+        yield """
+// embed exports
+void print(mp_obj_t str) {
     mp_obj_print(str, PRINT_STR);
     mp_obj_print(mp_obj_new_str_via_qstr("\\n",1), PRINT_STR);
 }
 
-static void null_pointer_exception(void){
+void
+null_pointer_exception(void) {
     fprintf(stderr, "null pointer exception in function pointer call\\n");
 }
 
-STATIC mp_obj_t PyBytes_FromString(char *string){
+mp_obj_t
+PyBytes_FromString(char *string){
     vstr_t vstr;
     vstr_init_len(&vstr, strlen(string));
     strcpy(vstr.buf, string);
     return mp_obj_new_str_from_vstr(&mp_type_bytes, &vstr);
 }
 
-#define None mp_const_none
-#define bytes(cstr) PyBytes_FromString(cstr)
-#define PyMethodDef const mp_map_elem_t
-#define PyModuleDef const mp_obj_module_t
-
 const char *nullbytes = "";
 //static int orem_id = 0;
 
-    """  % {'namespace': namespace, 'name': sys.argv[0]} )
+"""
+    else:
+        yield """
+// reuse embed exports
+extern void print(mp_obj_t str);
+extern void null_pointer_exception(void);
+extern mp_obj_t PyBytes_FromString(char *string);
+extern const char *nullbytes;
+"""
 
-    defmap.extend( clsmap )
-    return pylines, defmap, cbody
+    yield "// =========== DYNAMIC CONTENT ============"
+
+
+def get_before_2dots(line, match='(:', skip=''):
+
+    for m in match:
+        if line.find(m):
+            res = line[len(skip):].split(m,1)[0]
+            return res.split(':',1)[0].strip()
+
+
+def is_class(ls):
+    return ls.startswith('class ')
+
+def get_class(ls):
+    return get_before_2dots(ls.strip(),'(:','class ')
+
+def is_def(ls):
+    return ls.startswith('async def ') or ls.startswith('def ')
+
+def get_def(ls):
+    if ls.startswith('async def '):
+        return get_before_2dots(ls,'(:','async def ')
+
+    if ls.startswith('def '):
+        return get_before_2dots(ls,'(:','def ')
+
+class CBLOCK:
+
+    def __init__(self,xdef, **kw):
+        self.cdata = xdef
+        self.children = {}
+        for k,v in kw.items():
+            setattr(self, k, v)
+
+
+    def annotate(self,*argv,**kw):
+        self.__defaults__ = list(argv)
+        self.__annotations__ = kw
+
+        if not self.isdef:
+            for vn, cvar in self.v:
+                vt, vdef = cvar
+                self.__annotations__[vn] = (vt,vdef,)
+        else:
+            set_return_type(self)
+            self.__annotations__.setdefault('return', self.rt )
+
+            cvars, _ = self.header.rsplit(')',1)
+            _, cvars = split_strip('(',cvars)
+
+            self.cvar = cvars
+
+# TODO:FIXME: WRONG parsing
+            cvars = cvars.replace(', ',',')
+            stack = []
+            for cv in cvars.split(','):
+                cv = cv.strip()
+                if cv:
+                    vname, vtype, vdef = self._ann(cv)
+                    self.__annotations__[vname] = (vtype,vdef)
+                    stack.append( (vname, vtype, vdef,) )
+            self.stack = stack
+        return self
+
+    def _ann(self,cv):
+        if cv.find('=')>0:
+            cv, vdef = split_strip('=', cv)
+        else:
+            vdef = None
+
+        if cv.find(':')>0:
+            vn,vt = split_strip(':',cv)
+        elif cv:
+            if vdef is None:
+                raise Exception(self.scope.header)
+
+            if vdef[0] in '0123456789.':
+                if '.' in vdef:
+# TODO: FIXME: default floats precision
+                    vt = 'float'
+                else:
+                    vt = 'int'
+        return vn,vt,vdef
+
+    def _topy(self):
+        scope = self
+
+        if scope.asyncdef:
+            tdef = 'async def'
+        else:
+            tdef = 'def'
+        a =  []
+        for e in self.stack:
+            a.append( f'{e[0]}:{e[1]} = {e[2]}' )
+        if len(a):a.append('')
+        a = ', '.join( a)
+        return f'{tdef} {self.name}({a}) -> {self.rt}:'
+
+
+    def close_on(self, val):
+        global flow
+        current = self.cdata
+        current.append(val)
+        #listdup
+        self.cdata = list(current)
+        current.clear()
+        if len(flow):
+            pos = len(flow)
+            while (self.level < flow[pos-1].level):
+                pos -=1
+                if pos and isinstance(flow[pos-1], str):
+                    pos -= 1
+                if not pos:break
+
+            if pos!=len(flow):
+                self.flag = pos
+                flow.insert(pos,f'{len(flow)+1}:{self.name}')
+        flow.append( self )
+        return self.cdata
+
+    def __repr__(self):
+        r = '(%s)'% int( len(self.indent)/4 )
+
+        if self.isdef:
+            if self.asyncdef:
+                r+='async '
+            r+='def '
+        else:
+            r+='class '
+        r+=self.name
+        return r
+
+
+class CLASS(CBLOCK):
+    isdef = False
+
+class DEF(CBLOCK):
+    isdef = True
+
+
+
+def is_prepro(line):
+    if line.startswith('#if '):
+        return True
+    if line.startswith('#ifdef '):
+        return True
+    if line.startswith('#ifndef '):
+        return True
+    if line.startswith('#error '):
+        return True
+    if line.startswith('#warning '):
+        return True
+    if line.startswith('#pragma '):
+        return True
+    if line.startswith('#else'):
+        return True
+    if line.startswith('#endif'):
+        return True
+    if line.startswith('#include '):
+        return True
+    if line.startswith('#define '):
+        return True
+
+
+def read_one(source):
+    line = source.readline()
+    lr = line.rstrip()
+    ls = line.lstrip()
+    return line,lr,ls
+
+
+def get_ancestor(ls):
+    iscls = ls[6:].rsplit(':',1)[0].strip()
+    if iscls.find('(')<=0:
+        iscls= iscls+'(type)'
+    iscls, ancestor = iscls.split('(',1)
+    return ancestor.rsplit(')')[0].strip()
+
+def split_strip(c, l):
+    a,b = l.split(c, 1)
+    return a.strip(), b.strip()
+
+def unquote(x):
+    while len(x) and x[0] in '"\'':
+        x = x[1:]
+    while len(x) and x[-1] in '"\'':
+        x = x[:-1]
+    return x
+
+def annotation_var(l, indent=''):
+    if ':' in l:
+        if '=' in l:
+            head, vdef = split_strip('=',l)
+        else:
+            head = l
+            vdef = 'TODO_DEF_INIT'
+        vname, vtype = split_strip(':',head)
+
+    elif '=' in l:
+        vname, vtype = split_strip('=',l)
+        vdef = 'None'
+        if '(' in vtype:
+            vtype, vdef = split_strip(',',vtype[1:-1])
+        vtype = unquote(vtype)
+        vdef = unquote(vdef)
+
+    #return f'{indent}{vname}=("{vtype}", {vdef})'
+    return vname, (vtype, vdef)
+
+
+def line_read(source):
+    global log
+    in_comment = False
+    while True:
+        line, lr, ls = read_one(source)
+    #============================================================
+    # FIXME: very bad comment analyser, fix that asap
+        was_comment = in_comment
+        while in_comment:
+            log.append( "#" + lr )
+            if lr.endswith('*/'):  # does not handle trailing code after a */
+                in_comment = False
+            else:
+                line,lr,ls = read_one(source)
+        else:
+            if was_comment:
+                continue
+
+        # does not handle end of line comments
+        if ls.startswith('//'):
+            log.append( lr.replace('//','# ') )
+            continue
+
+        if ls.startswith('#'):
+            log.append( lr )
+            continue
+
+        if ls.startswith('/*'):
+           if lr.endswith('*/'):
+                log.append( "#" + lr )
+                continue
+           in_comment = True
+           continue
+        # not a comment
+        break
+    return line, lr, ls
+    #============================================================
+
+
+
+
+
+
+def py2x(vd_namespace, vd_filename, source, ):
+    global scopes, flow, namespace, filename
+
+    # reset
+    scopes.clear()
+    flow.clear()
+    log.clear()
+
+    namespace = vd_namespace
+    filename = vd_filename
+
+    kdef = []
+    cdef = []
+    in_class = ''
+
+    for x  in range(8):
+        scopes.append([])
+    scopes[0].append( CLASS(kdef, name='__main__', indent='',  prefix='', ancestor='') )
+
+    main = scopes[0][-1]
+
+    in_def = ''
+    in_async = False
+
+
+    line= ''
+    lr = ''
+    ls = ''
+
+    while True:
+        line,lr,ls = read_one(source)
+        if not line:
+            yield '//EOF'
+            return
+
+        if not ls:
+            yield ''
+            continue
+
+        if is_class(ls):
+            in_class = get_class(ls)
+            break
+
+        if is_def(ls):
+            in_async = ls.startswith('async def ')
+            in_def = get_def(ls)
+            break
+
+        # fix #type comments to // ones
+        if ls[0] in '#':
+            test_prepro = is_prepro(line)
+            if not test_prepro:
+                # convert comment to C
+                yield '// ' + line[1:]
+                continue
+        yield lr
+
+    yield '// end of embedded header'
+    yield '// ============================================================='
+    yield ''
+
+    lvl = 1
+    was = 1
+
+    last_indent = ' ' * (len(lr.lstrip()) - len(ls))
+
+    prefix = ''
+    apref = ''
+
+    def endbegin_def(elvl, blvl, ls):
+        global scopes
+        nonlocal cdef, prefix, indent
+
+        old = []
+
+        #end current def if any at level
+        if elvl:
+            if len(scopes[elvl]):
+                if scopes[elvl][-1].isdef:
+                    rmdef = scopes[elvl].pop()
+                    if rmdef.asyncdef:
+                        apref = 'async '
+                    else:
+                    # TODO inherit ASYNC
+                        apref = ''
+
+                    val = f'{rmdef.indent}// End[{elvl}]: {apref}{rmdef.prefix}{rmdef.name}'
+                    old = rmdef.close_on(val)
+                    apref = ''
+                    cdef.clear()
+        if blvl:
+            if is_def(ls):
+                in_def = get_def(ls)
+                in_async = ls.startswith('async def ')
+                if in_async:
+                    apref = 'async '
+                else:
+                    apref = ''
+                in_def = get_def(ls)
+
+                newdef = DEF(cdef,
+                    name = in_def,
+                    level = blvl,
+                    c = [],
+                    header = ls.strip(),
+                    prefix=prefix,
+                    parent=scopes[blvl-1][-1],
+                    ancestor=get_ancestor(ls),
+                    indent=indent,
+                    asyncdef = in_async,
+                )
+
+                scopes[blvl].append( newdef )
+
+                cdef.append(f'''
+{indent}{apref}def {newdef.name}():''')
+        return old, cdef
+
+    def endbegin_class(elvl, blvl, ls):
+        global scopes
+        nonlocal in_class, kdef, indent
+
+        old = []
+
+        if elvl:
+            if len(scopes[elvl]):
+                if not scopes[elvl][-1].isdef:
+                    rmcls = scopes[elvl].pop()
+                    val = f'    // End[{elvl}] {repr(rmcls.prefix)} scope {len(indent)}'
+                    old = rmcls.close_on(val)
+                    kdef.clear()
+
+        if blvl:
+            if is_class(ls):
+                in_class = get_class(ls)
+                prefix = f'{in_class}_'
+                ancestor = get_ancestor(ls)
+                # begin class
+                newcls = CLASS(kdef,
+                    name = in_class,
+                    v = [],
+                    c = [],
+                    header = ls.strip(),
+                    level = blvl,
+                    parent=scopes[blvl-1][-1],
+                    prefix=prefix,
+                    ancestor=ancestor,
+                    indent=indent,
+                )
+                scopes[blvl].append( newcls )
+
+                kdef.append( f'''
+{indent}class [{in_class}]({ancestor}):
+{indent}    // Begin[{blvl}]: {repr(prefix)} scope {len(indent)}
+''' )
+
+        return old, kdef
+
+
+    def boundaries_def(elvl, blvl, ls):
+        global log
+        nonlocal cdef
+        try:
+            old, cdef = endbegin_def(elvl, blvl, ls)
+            if len(old): log.append( old[-1])
+            if len(cdef): log.append(  cdef[0] )
+        except:
+            print(elvl,':',scopes[elvl], blvl,':',scopes[blvl], ls)
+            raise
+        return log
+
+
+    def boundaries_class(elvl, blvl, ls):
+        global log
+        try:
+            nonlocal kdef
+            old, kdef = endbegin_class(elvl, blvl, ls)
+            if len(old): log.append( old[-1])
+            if len(kdef): log.append(  kdef[0] )
+        except:
+            print(elvl,':',scopes[elvl], blvl,':',scopes[blvl], ls)
+            raise
+        return log
+
+
+    while line:
+        indent = ' ' * (len(lr) - len(ls.rstrip()))
+
+        while line:
+            if not ls:
+                log.append('')
+                break
+
+            isd = is_def(ls)
+            if isd:
+                isc = False
+            else:
+                isc = is_class(ls)
+
+
+                # either code or annotations
+
+                if not isc: # not isd implied
+                    current = scopes[lvl][-1]
+                    if not current.isdef:
+                        current.v.append( annotation_var( lr.lstrip()) )
+                        log.append( f'+{indent}{current.v[-1]}' )
+                    else:
+                        current.c.append(lr[len(current.indent):])
+                        log.append( f'+{indent}{current.c[-1]}' )
+                    break
+
+            # analyse current state of indentation
+
+            was = lvl
+            if indent>last_indent:
+                lvl += 1
+            elif indent<last_indent:
+                lvl -= 1
+
+            last_indent = indent
+
+            # apply to opened scopes
+
+            if was == lvl:
+                if isd:
+                    # close same lvl def, add new def same lvl
+                    boundaries_def(lvl, lvl, ls)
+                    break
+
+                if isc:
+                    # close previous subdef, close previous subclass, close same level class, open same level class
+                    boundaries_def(lvl+1, 0, ls)
+
+                    #FIXME: WRONG a class can be interleaved in a def body
+                    boundaries_def(lvl, 0, ls)
+
+                    boundaries_class(lvl+1, 0, ls)
+                    boundaries_class(lvl, lvl, ls)
+                    log.append( f'// ({was},{lvl})>C' )
+                    break
+                log.append('???')
+
+            elif was<lvl:
+                # open new def in current level
+                if isd:
+                    log.append('>>>D')
+                    # BEWARE: a def can be interleaved in a def body
+                    boundaries_def(0, lvl, ls)
+                    break
+                if isc:
+                    log.append('>>>C')
+                    # BEWARE: a class can be interleaved in a def body
+                    boundaries_class(0, lvl, ls)
+                    break
+
+            elif was>lvl:
+                # TODO: FIXME: more than one lvl dedent at once
+                if isd:
+                    boundaries_def(was, 0, ls)
+                    log.append('<<<D')
+                    boundaries_class(lvl, 0, ls)
+                    boundaries_def(0, lvl, ls)
+                elif isc:
+                    log.append( '<<<C' )
+                else:
+                    log.append('<<<?')
+            break
+
+        # on break
+        while len(log):
+            log.pop(0)
+            #yield log.pop(0)
+
+        line, lr, ls = line_read(source)
+
+        while len(log):
+            log.pop(0)
+            #yield log.pop(0)
+
+
+
+    while len(scopes):
+        lvl = len(scopes)-1
+        while len(scopes[lvl]):
+            boundaries_def(lvl,0,'')
+            boundaries_class(lvl,0,'')
+
+        if not len(scopes[lvl]):
+            scopes.pop()
+        if lvl==1:break
+
+    todel = []
+    for i, scope in enumerate(flow):
+
+        if scope and isinstance(scope, str):
+            slot, name = scope.split(':',1)
+            slot=int(slot)
+            flow[i] = flow[slot]
+            flow[slot] = None
+            todel.append(slot)
+    todel.sort()
+    while len(todel):
+        flow.pop( todel.pop() )
+
+
+
+
+
+
+def set_return_type(scope):
+    h  = scope.header.replace(' ','')
+    if not h.find(')->')>0:
+        scope.rt = 'void'
+    else:
+        _, tail = h.rsplit(')->')
+        tail = tail.strip(' :')
+        scope.rt = tail
+
+
+
+
+
+
+
+def ind(scope, decal=0):
+    return '....' * (scope.level + decal + 0)
+
+
+def to_py():
+
+    def compact_find(st, subst):
+        return st.replace(' ','').find( subst.replace(' ','') )>=0
+
+    def compact_ends(st, subst):
+        return st.replace(' ','').endswith( subst.replace(' ','') )
+
+
+
+
+    yield('''
+
+class VarType(str):pass
+
+NULL = VarType('NULL')
+void = VarType('void')
+void_p = VarType('void *')
+mp_raw_code_t_p = VarType('mp_raw_code_t *')
+const_char_p = VarType('const char *')
+mp_obj_t_p = VarType('mp_obj_t *')
+''')
+    yield('class module:')
+    prev = last = flow[0]
+
+    for i in range(len(flow)):
+        if i:
+            prev  = flow[i-1]
+        scope = flow[i]
+        if not scope.isdef:
+            yield("")
+            last = scope
+
+            yield(f'''{ind(scope)}class {scope.name}({scope.ancestor}):
+{ind(scope,1)}__base__ = {scope.ancestor}
+{ind(scope,1)}__ancestor__ = {scope.ancestor}
+''')
+
+            for vn, cvar in scope.v:
+                vt, vdef = cvar
+                yield(f"//{ind(scope, +1)}{vn} : {vt} = {vdef}")
+
+            yield("")
+            continue
+
+        if scope.level< prev.level:
+            yield(f"{ind(scope)}{last.name}={last.name}")
+            yield("")
+
+        # it's a def
+        scope.annotate()
+        yield(f'''{ind(scope)}{scope._topy()}
+
+{ind(scope, 1)}return {scope.__annotations__}''')
+
+
+class TopLevel:
+    def __init__(self):
+        self.children = {}
+        self.level = 0
+        self.name = '__main__'
+        self.__annotations__ = {}
+
+    def __repr__(self):
+        return '(%d)%s' % (self.level,self.name)
+
+
+
+
+
+
+def to_c(headlines):
+
+    yield( headlines.pop(0) )
+
+    for l in standard_c_header( **{'namespace': namespace, 'name': filename} ):
+        yield l
+
+    while len(headlines):
+        yield( headlines.pop(0) )
+
+    from .cify import cify
+
+    prev = last = flow[0]
+
+    module = TopLevel()
+
+    cp = [module]
+
+    tlv = [module]
+
+    for i in range(len(flow)):
+        if i:
+            prev  = flow[i-1]
+        scope = flow[i]
+
+        # it's a class
+        if not scope.isdef:
+            cp.append( scope )
+            if not scope in tlv:
+                tlv.append( scope )
+            last = scope
+
+            # convert dataclasses to annotations
+            scope.annotate()
+            continue
+
+        if scope.level< prev.level:
+            cp.pop()
+
+        # it's a def
+        scope.annotate()
+
+        cp[-1].children[scope.name] = scope
+
+    for cline in cify(namespace,tlv):
+        yield cline
 
 
