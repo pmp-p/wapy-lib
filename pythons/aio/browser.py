@@ -1,6 +1,11 @@
 import pythons.aio.plink
 
-from pythons.aio.plink import window, CallPath
+#from pythons.aio.plink import window, CallPath, vm
+aiovmctl = aio.vm.aio.ctl
+
+
+CallPath = pythons.aio.plink.CallPath
+
 
 # https://raw.githubusercontent.com/micropython/micropython-lib/master/socket/socket.py
 #
@@ -101,7 +106,7 @@ class socket:
         return self
 
     async def async_listen(self):
-        self.sid = await window.aio.bind(self.iface, self.port)
+        self.sid = await aiovmctl.bind(self.iface, self.port)
         return self
 
     def listen(self):
@@ -128,13 +133,13 @@ class socket:
 
     async def async_accept(self, filter):
         s = self.__class__()
-        s.sid = await window.aio.accept(filter)
+        s.sid = await aiovmctl.accept(filter)
         result = await s.set_open(self.tmout)
-        await window.aio.connect(s.fileno())
+        await aiovmctl.connect(s.fileno())
         return result
 
     async def connect(self, addr, tmout):
-        self.sid = await window.aio.open_ws(*addr)
+        self.sid = await aiovmctl.open_ws(*addr)
         return await self.set_open(tmout)
 
     def accept(self):
@@ -204,8 +209,8 @@ builtins.aio_return = aio_return
 
 
 def aio_write(fd, data):
-    window.aio_write(fd,data)
-    window.finalize
+    aiovmctl.write(fd,data)
+    aio.vm.finalize
 
 builtins.aio_write = aio_write
 

@@ -1,7 +1,6 @@
 # ❯❯❯
 
 import sys
-import pythons as use
 from ujson import loads, dumps
 import uasyncio
 from uasyncio import *
@@ -42,6 +41,7 @@ class Event(dict):
     def __getattr__(self,attr):
         return self[attr]
 
+# BEWARE : THIS IS NOT AN ASYNC FUNCTION
 def step(jsdata):
     global q,IOCTL, error, loop, fds
 
@@ -94,7 +94,9 @@ def step(jsdata):
             sys.print_exception(e, sys.stderr)
             jsdata = {}
 
-        loop.run_once()
+        # no ctx, call just set the async context
+        with aio.ctx:
+            loop.run_once()
     return None
 
 # TODO: use nanoseconds
@@ -129,12 +131,12 @@ def await_for(coro, tmout):
     embed.CLI()
     stop_at = int(Time.time() + tmout)
     fildes = id(coro)
-    loop.create_task( Future(fildes,coro) )
+    loop.create_task( Future(fildes, coro) )
     lio[fildes] = undef
     while lio.get(fildes) is undef:
         import aio_suspend
         if int(Time.time())>stop_at:
-            pdb("124:await_for tmout")
+            print("136:await_for tmout")
             break
     embed.STI()
     return lio.pop(fildes)

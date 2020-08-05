@@ -9,7 +9,7 @@
 
 
 import embed
-import sys, os, builtins
+import sys, os, builtins, time
 
 import json
 
@@ -40,33 +40,10 @@ python3 = sys.modules[__name__]
 
 # no dll/so hook when in host "emulator"
 if not __UPY__:
-
     if hasattr(sys, "getandroidapilevel"):
         builtins.__EMU__ = False
         builtins.__ANDROID__ = True
-        # would only works for root
-        # sys.path.insert(0,"/data/data/{{ cookiecutter.bundle }}.{{ cookiecutter.module_name }}/usr/lib/pythons.7/lib-dynload")
-
-        # so use importlib
-
-        import importlib
-        import importlib.abc
-        import importlib.machinery
-
-        class ApkLibFinder(importlib.abc.MetaPathFinder):
-            @classmethod
-            def find_spec(cls, name, path=None, target=None):
-                try:
-                    lib = f"{os.environ['DYLD']}/lib{name}.so"
-                    os.stat(lib)
-                    pdb(f"ApkLibFinder found : {lib}")
-                    loader = importlib.machinery.ExtensionFileLoader(name, path)
-                    return importlib.machinery.ModuleSpec(name=name, loader=loader, origin=lib)
-
-                except FileNotFoundError:
-                    return None
-
-        sys.meta_path.append(ApkLibFinder)
+        from .aosp import *
     else:
         print("running in host emulator or wasm")
         builtins.__EMU__ = True
@@ -74,8 +51,6 @@ if not __UPY__:
 
     try:
         import ctypes
-
-
         import os
 
         if not __EMU__:
@@ -165,7 +140,7 @@ else:
 
     import utime as Time
 
-import pythons.aio
+#import pythons.aio
 import pythons.aio.plink
 
 # TODO: in case of failure to create "Application" load a safe template
@@ -212,53 +187,16 @@ except Exception as e:
     try:
         sys.print_exception(e)
     except:
-        embed.log("214: %r" % e )
+        embed.log("190: %r" % e )
 
 
 
 
-import pythons.aio as aio
-
-# aio is a vital component make sure it is wide access.
-builtins.aio = aio
 # =====================================================================
 
 
-class Lapse:
-    def __init__(self, intv=1.0, oneshot=None):
-        self.intv = int(intv * 1000000)
-        self.next = self.intv
-        self.last = Time.time() * 1000000
-        if oneshot:
-            self.shot = False
-            return
-        self.shot = None
 
-    # FIXME: pause / resume(reset)
-
-    def __bool__(self):
-        if self.shot is True:
-            return False
-
-        t = Time.time() * 1000000
-        self.next -= t - self.last
-        self.last = t
-        if self.next <= 0:
-            if self.shot is False:
-                self.shot = True
-            self.next = self.intv
-            return True
-
-        return False
-
-
-class GenClass:
-    def __init__(self, cn, ip):
-        self.cn = cn
-        self.ip = ip
-
-
-OneSec = Lapse(1)
+OneSec = time.Lapse(1)
 lastc = 0
 wall_s = 0
 tested = False

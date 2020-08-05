@@ -53,11 +53,12 @@ O_NONBLOCK = const(0o0004000)
 P_WAIT = 0
 P_NOWAIT = 1
 
-error = const(OSError)
+#pycopy only: const( not int )
+error = OSError
 name = "posix"
-sep = const("/")
-curdir = const(".")
-pardir = const("..")
+sep = "/" #const("/")
+curdir = "." #const(".")
+pardir = ".." #const("..")
 
 
 libc = ffilib.libc()

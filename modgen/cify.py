@@ -28,11 +28,19 @@ def read_init(IDX, T, name, V):
     if (argc>{IDX}) {{ {name} = (void*)argv[{IDX}] ; }} else {{ {name} = &null_pointer_exception; }}
 """
 
-    if T in ['int','float']:
+    if T in ['int']:
             return f"""
     int {name}; // {(T,name,V,)}
     if (argc>{IDX}) {{ {name} = mp_obj_get_{T}(argv[{IDX}]); }} else {{ {name} = {V} ; }}
 """
+
+    if T in ['float','double']:
+        T = "double"
+        return f"""
+    double {name}; // {(T,name,V,)}
+    if (argc>{IDX}) {{ {name} = mp_obj_get_{T}(argv[{IDX}]); }} else {{ {name} = {V} ; }}
+"""
+
 
     if T in ['pstr']:
         val = str_default(V)
@@ -56,6 +64,30 @@ def read_init(IDX, T, name, V):
     if (argc>{IDX}) {{ {name} = ({T})argv[{IDX}]; }}
     else {{ {name} = {V} ; }}
 """
+
+
+
+def is_prepro(line):
+    if line.startswith('#if '):
+        return True
+    if line.startswith('#ifdef '):
+        return True
+    if line.startswith('#ifndef '):
+        return True
+    if line.startswith('#error '):
+        return True
+    if line.startswith('#warning '):
+        return True
+    if line.startswith('#pragma '):
+        return True
+    if line.startswith('#else'):
+        return True
+    if line.startswith('#endif'):
+        return True
+    if line.startswith('#include '):
+        return True
+    if line.startswith('#define '):
+        return True
 
 
 def make_c_type(tc, default=None):
@@ -105,29 +137,39 @@ def annotation_rt(ann):
 
     tp = tc
 
+
+
 # TODO: use mp_types
     if tc in ('dict',):
         tc = 'mp_obj_dict_t *'
 
-    if tc in ('int','long','unsigned long'):
+    # FIXME _int_from_ conversions
+    elif tc in ('int','long','unsigned long'):
         tp = 'int'
+        tc = 'long'
 
-    if tc in ('float','double'):
+    elif tc in ('float','double'):
         tp = 'double'
 
-    if tc in ('bytes',):
+    elif tc in ('bytes',):
         tc = 'char *'
         tp = 'bytes'
         defv = '(char *)nullbytes'
 
-    if tc in ('str','pstr'):
+    elif tc in ('str','pstr'):
         tc = 'const char *'
         tp = 'qstr'
 
     # unlikely
-    if tc in ('cstr','const_char_p'):
+    elif tc in ('cstr','const_char_p'):
         tc = 'const char *'
         tp = 'str'
+
+    elif tc[0]=='_':
+        tp = tc
+        tc  = tc.rsplit('_',1)[-1]
+        if tc=='ptr':
+            tc= 'uintptr_t'
 
     return prefix, tc, tp, defv
 
@@ -144,7 +186,9 @@ def annotation_stack(ann):
 
 def block_from_c_value(prefix, rtp):
     body = []
-    if rtp == 'int':
+    if rtp[0]=='_':
+        body.append(f'{prefix} mp_obj_new{rtp}(__creturn__);')
+    elif rtp == 'int':
         body.append(f'{prefix} mp_obj_new_int(__creturn__);')
     elif rtp == 'bytes':
         body.append(f'{prefix} PyBytes_FromString(__creturn__);')
@@ -222,6 +266,10 @@ def build_method_code(cfunc, scope, rtc, rtp, fast_ret, with_finally = False):
         body.append( '\n    // ------- method body (try/finally) -----' )
 
     for cline in scope.c:
+        if is_prepro(cline.lstrip()):
+            body.append( cline  )
+            continue
+
         cline = self_line(cline)
 
         cls = cline.lstrip()
@@ -329,7 +377,7 @@ def build_method(nscname, decal_stack, scope):
     rt_prefix, rtc, rtp, rt_default = annotation_rt(c_type)
 
     # input stack : kw and named args not handled atm
-    argc = len(ann)
+    argc = len(ann)+decal_stack
     stack_ann = annotation_stack(ann)
 
     cfunc = []
@@ -393,7 +441,7 @@ def build_method(nscname, decal_stack, scope):
         cfunc[fast_ret] = '// opt : void return'
 
     cfunc.extend( build_method_code(cfunc, scope, rtc, rtp, fast_ret, with_finally=has_finally) )
-    return len(argv), c_type, p_type, '\n'.join(cfunc)
+    return argc, c_type, p_type, '\n'.join(cfunc)
 
 
 #===============================================================

@@ -18,9 +18,12 @@
 # and later build native accelerators (eg  jnius / rubicon / typescript-wasm ... )
 
 
-
-
 DBG = 0
+ADBG = 0
+SDBG = 0
+
+
+
 if __UPY__:
     import embed
     from ujson import dumps, loads
@@ -30,16 +33,12 @@ else:
     import binascii
     from json import dumps, loads
 
-ADBG = 1
 
-if hasattr(sys,'getandroidapilevel'):
-    import builtins
-    builtins.__ANDROID__ = sys.getandroidapilevel()
-    import embed
-else:
-    builtins.__ANDROID__ = False
-    from pythons import aio
-    import embed
+import builtins
+
+from pythons import aio
+
+# __ANDROID__ and __UPY__ should be set by 'pythons'
 
 
 class BaseProxy:
@@ -68,7 +67,6 @@ class obj:
 
 
 
-
 class CallPath(dict):
 
     proxy = None #BaseProxy
@@ -81,7 +79,7 @@ class CallPath(dict):
         self.__fqn = fqn
         self.__name = fqn.rsplit(".", 1)[-1]
         self.__host = host
-        self.__solved = None
+        self.__solved = undef
         self.__aself = None
 
         if not self in CallPath.aioq:
@@ -117,10 +115,6 @@ class CallPath(dict):
             if not len(CallPath.aioq):
                 aio.finalize()
             return None
-
-        # auto-await
-#        if not self in CallPath.aioq:
-#            CallPath.aioq.append(self)
 
         if name in self:
             return self[name]
@@ -205,19 +199,21 @@ class CallPath(dict):
         if len(cs):
             solvepath, argv, kw = cs.pop(0)
             cid = self.proxy.act(solvepath, argv, kw)
-            if ADBG:
+            if ADBG or SDBG:
                 print(self.__fqn, '205:__solver about to wait_answer(%s)' % cid, solvepath, argv, kw)
             self.proxy.q_req.append(cid)
             self.__solved, unsolved = await self.proxy.wait_answer(cid, unsolved, solvepath)
 
             # FIXME:         #timeout: raise ? or disconnect event ?
             # FIXME: strip solved part on fqn and continue in callstack
+
+            if ADBG or SDBG:
+                print(self.__fqn, '214:__solver got wait_answer(%s)' % cid, self.__solved)
+
             if not len(unsolved):
                 return self.__solved
-            if DBG:
-                print(self.__fqn, '214:__solver got wait_answer(%s)' % cid, self.__solved)
         else:
-            if DBG:
+            if ADBG or SDBG:
                 print('217:__solver about to get(%s)' % unsolved)
 
             if __UPY__:
@@ -236,7 +232,7 @@ class CallPath(dict):
             try:
                 return self.__solved
             finally:
-                self.__solved = None
+                self.__solved = undef
 
     else:
         # uasyncio __await__ not called
@@ -247,19 +243,36 @@ class CallPath(dict):
 
 
     def __call__(self, *argv, **kw):
-#        if DBG:
-#            print("273:cp-call (a/s)?", self.__fqn, argv, kw)
+        if DBG or SDBG:
+            print("251:cp-call (a/s)?", self.__fqn, argv, kw)
+
+
         # stack up the (a)sync call list
         self.__csp.append([self.__fqn, argv, kw])
+
+        # async is still the only cpython way
+        # this block will only work on wapy
+
+
+#            aio.loop.create_task( self.__solver() )
+#            tmout = 20
+#            while tmout and (self.__solved is undef):
+#                import aio_suspend
+#                print('wait',tmout)
+#                tmout -= 1
+#            try:
+#                return self.__solved
+#            finally:
+#                self.__solved = undef
         return self
 
 
     def __enter__(self):
-        if DBG:print("223:cp-enter")
+        if DBG:print("258:cp-enter")
         return self
 
     async def __aenter__(self):
-        if ADBG:print("258:cp-(async)enter", self.__fqn,*self.__csp)
+        if ADBG:print("262:cp-(async)enter", self.__fqn,*self.__csp)
         self.__aself = await self
         return self.__aself
 
@@ -274,7 +287,7 @@ class CallPath(dict):
         print("#FIMXE: __del__ on proxy to release js obj")
 
     async def __aexit__(self, type, value, traceback):
-        if ADBG:print("273:cp-(async)exit", self.__fqn,len(CallPath.aioq)) #*self.__csp)
+        if ADBG:print("277:cp-(async)exit", self.__fqn,len(CallPath.aioq)) #*self.__csp)
         while len(CallPath.aioq):
             aself = CallPath.aioq.pop(0)
             aself.finalize
@@ -300,6 +313,12 @@ class CallPath(dict):
     #                await sleep_ms(1)
     #            return rv
 
+# TODO: make non optimized verbose func for non wapy-vm sending warnings for sync calls
+    def _(self, tmout):
+        if not aio.ctx:
+            self.finalize
+            return aio.await_for(self.__solver(), tmout )
+
     def __repr__(self):
         # if self.__fqn=='window' or self.__fqn.count('|'):
         # print("FIXME: give tip about remote object proxy")
@@ -310,10 +329,10 @@ class CallPath(dict):
 
         # return ":async-pe-get:%s" % self.__fqn
 
+
+
     def __str__(self):
         return self.__fqn
-
-
 
 
 if __ANDROID__:
@@ -473,7 +492,7 @@ else:
             if DBG:
                 print('\tas id %r with tmout=%i' % (cid,self.tmout) )
             unsolved = fqn[len(solvepath) + 1 :]
-            tmout = self.tmout
+            tmout = self.tmout // 50
 
             if unsolved:
                 if DBG:
@@ -488,7 +507,7 @@ else:
                     if DBG:
                         print("OID=",oid ,"solved=",solved ,"unsolved=", unsolved)
 
-                    if solved is not None:
+                    if solved is not undef:
                         if isinstance(unsolved,str) and len(unsolved):
                             solved = await self.get("%s.%s" % (oid, unsolved), None)
                             unsolved = ''
@@ -516,7 +535,11 @@ else:
     # JsProxy
 
     CallPath.set_proxy(Proxy())
-    window = CallPath().__setup__(None, 'window', [], tip="[ object Window]")
+    builtins.window = CallPath().__setup__(None, 'window', [], tip="[ object Window]")
+    builtins.document = CallPath().__setup__(None, 'document', [], tip="[ object document]")
+    aio.vm = CallPath().__setup__(None, 'vm', [], tip="[ object vm]")
+
+
 
 
 

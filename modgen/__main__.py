@@ -50,13 +50,9 @@ for pym in glob.glob( os.path.join(USER_C_MODULES,'*.pym')):
                 sys.print_exception(e, sys.stderr)
                 raise SystemExit(1)
 
-            #exec(bytecode,  __import__('__main__').__dict__, globals())
-
-
         # create build folder, will host makefile and transpiled code
         mod_dir = f"{USER_C_MODULES}/{namespace}"
         os.makedirs(mod_dir, exist_ok=True)
-
 
         # create the makefile
 

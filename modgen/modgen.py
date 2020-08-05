@@ -31,6 +31,8 @@ def standard_c_header(**kw):
 #define PyMethodDef const mp_map_elem_t
 #define PyModuleDef const mp_obj_module_t
 #define STATIC static
+#define mp_obj_get_double mp_obj_get_float
+#define mp_obj_new_int_from_ptr mp_obj_new_int_from_ull
 
 """  % kw )
 
@@ -68,7 +70,7 @@ extern mp_obj_t PyBytes_FromString(char *string);
 extern const char *nullbytes;
 """
 
-    yield "// =========== DYNAMIC CONTENT ============"
+    yield "// =========== embedded header from .pym ============\n"
 
 
 def get_before_2dots(line, match='(:', skip=''):
@@ -372,7 +374,7 @@ def py2x(vd_namespace, vd_filename, source, ):
 
         # fix #type comments to // ones
         if ls[0] in '#':
-            test_prepro = is_prepro(line)
+            test_prepro = is_prepro(ls)
             if not test_prepro:
                 # convert comment to C
                 yield '// ' + line[1:]

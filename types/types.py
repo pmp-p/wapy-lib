@@ -36,6 +36,29 @@ BuiltinMethodType = type([].append)     # Same as BuiltinFunctionType
 ModuleType = type(sys)
 
 try:
+    ModuleType("#")
+except:
+    def ModuleType__call__(name):
+        import sys
+        if sys.modules.get('name'):
+            print("Error : module %s exists !"%name)
+            return sys.modules[name]
+
+        # get a new fresh module
+        # be sure to use the real builtin import function
+        impattr = getattr( sys.modules.get('imp', __import__('builtins') ), '__import__' )
+        pivot = impattr('_imp_empty_mod') #
+        # low risk, who would call his module like that ?
+        del sys.modules['_imp_empty_mod']
+
+        #still unknown at this time
+        if hasattr(pivot,'__file__'):
+            del pivot.__file__
+
+        pivot.__name__ = name
+        return pivot
+
+try:
     raise TypeError
 except TypeError:
 #    tb = sys.exc_info()[2]

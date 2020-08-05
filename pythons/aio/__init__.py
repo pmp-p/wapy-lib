@@ -2,15 +2,15 @@ import builtins, sys
 
 aio = sys.modules[__name__]
 
+# aio is a vital component make sure it is wide access.
 builtins.aio = aio
-
-# just in case someday cpython would have it
-sys.modules['aio'] = aio
-
 
 
 # for repl completion
-__import__('__main__').__dict__['aio'] = aio
+vars( __import__('__main__') )['aio'] = aio
+
+# just in case someday cpython would have it
+sys.modules['aio'] = aio
 
 
 if __UPY__:
@@ -19,7 +19,13 @@ if __UPY__:
         pdb("16: no async websocket provider")
 
     # implementation provided builtins
-    suspend = aio_suspend
+    try:
+        suspend = aio_suspend
+    except:
+        print("WARNING: that Python implementation lacks aio_suspend()", file=sys.stderr)
+        def suspend():
+            print('27: aio_suspend N/I')
+        builtins.aio_suspend = suspend
 else:
     from .cpy.aio import *
 
@@ -167,7 +173,7 @@ def start(argv,env):
         return pdb("80: aio can't start twice")
 
     try:
-        corofn = getattr( __import__('__main__'), '__main__' )
+        corofn = getattr( __import__('__main__'), 'main' )
         embed.log(f"run async main : {corofn}")
         loop.create_task( corofn(*argv, **env) )
         aio.error = False
