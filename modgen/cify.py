@@ -114,6 +114,9 @@ def make_c_type(tc, default=None):
         tc='mp_obj_t'
         default = 'mp_const_none'
 
+    if default is None and tc.find('int')>=0:
+        default = 0
+
     return tc, default
 
 def cvar_any(name, obj ):

@@ -319,6 +319,7 @@ class CallPath(dict):
             self.finalize
             return aio.await_for(self.__solver(), tmout )
 
+
     def __repr__(self):
         # if self.__fqn=='window' or self.__fqn.count('|'):
         # print("FIXME: give tip about remote object proxy")
@@ -329,10 +330,17 @@ class CallPath(dict):
 
         # return ":async-pe-get:%s" % self.__fqn
 
-
-
     def __str__(self):
         return self.__fqn
+
+
+    if not __ANDROID__:
+
+        # dom "optimizers"
+
+        def __lshift__(self, o):
+            aio.vm.dom.lshift(str(self),str(o))
+            aio.vm.dom.finalize
 
 
 if __ANDROID__:

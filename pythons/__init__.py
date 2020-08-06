@@ -1,5 +1,5 @@
 # opiniated decision to make sys/time/aio available everywhere to reduce scripting bloat / repl overhead
-# if you don't agree, continue to write all your import as usual :)
+# if you don't agree, continue to write all your imports as usual :)
 
 import sys
 import builtins
@@ -50,4 +50,42 @@ from .python3 import *
 import time
 builtins.time = time
 
+if __UPY__:
+    import embed
 
+    core_argv = []
+    core_kw = {}
+    pycore = {'':undef}
+
+    def reg(fn):
+        pycore[fn.__name__] = fn
+
+    @reg
+    def pouet(*argv, **kw):
+        print('Je suis "pouet", écrite en python et je suis chouette !')
+        print('ma pile : ', argv)
+        print('mes motclefs : ', kw)
+        print('bye')
+
+    @reg
+    def pyc_excepthook(type, value, tb, **kw):
+        print("pyc_excepthook",type, value, tb)
+
+    def core_py(fn):
+        global pycore, core_argv, core_kw
+        fnex = pycore.get(fn, undef)
+        print("(CorePy)%s(*%r,**%r) Calls" % (fn, core_argv, core_kw), fnex )
+        try:
+            return fnex(*core_argv, **core_kw)
+        except:
+            return undef
+        finally:
+            core_kw.clear()
+            core_argv.clear()
+
+    def core_pyv(v):
+        #print('(CorePy)added', v)
+        core_argv.append(v)
+
+    embed.set_ffpy(core_py)
+    embed.set_ffpy_add(core_pyv)
