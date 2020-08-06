@@ -61,11 +61,11 @@ if __UPY__:
         pycore[fn.__name__] = fn
 
     @reg
-    def pouet(*argv, **kw):
-        print('Je suis "pouet", écrite en python et je suis chouette !')
-        print('ma pile : ', argv)
-        print('mes motclefs : ', kw)
-        print('bye')
+    def pyc_test(*argv, **kw):
+        print('pyc_test (python):')
+        print('argv : ', argv)
+        print('kw : ', kw)
+        print('done')
 
     @reg
     def pyc_excepthook(type, value, tb, **kw):
@@ -74,7 +74,7 @@ if __UPY__:
     def core_py(fn):
         global pycore, core_argv, core_kw
         fnex = pycore.get(fn, undef)
-        print("(CorePy)%s(*%r,**%r) Calls" % (fn, core_argv, core_kw), fnex )
+        #print("(CorePy)%s(*%r,**%r) Calls" % (fn, core_argv, core_kw), fnex )
         try:
             return fnex(*core_argv, **core_kw)
         except:
