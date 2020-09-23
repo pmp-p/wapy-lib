@@ -57,6 +57,8 @@ MULTILINE = M = 2
 DOTALL = S = 4
 VERBOSE = X = 8
 PCRE_ANCHORED = 0x10
+# Ignored
+LOCALE = L = 0
 
 # ASCII is a special value ditinguishable from 0
 ASCII = A = 0x4000
@@ -148,6 +150,7 @@ class PCREPattern:
         return self.search(s, pos, endpos, PCRE_ANCHORED)
 
     def _handle_repl_escapes(self, repl, match):
+<<<<<<< HEAD
 
         def handle_escape(esc_match):
             gr = None
@@ -196,13 +199,69 @@ class PCREPattern:
         return sub(r"\\(0[0-7]*|\d+|g<.+?>|.)", handle_escape, repl)
 
     def sub(self, repl, s, count=0):
+=======
+
+        def handle_escape(esc_match):
+            gr = None
+            e = esc_match.group(1)
+            if e.startswith("0"):
+                # Octal escape
+                return chr(int(e, 8))
+            elif e.startswith("g"):
+                gr = e[2:-1]
+            elif e.isdigit():
+                is_oct = False
+                if e.startswith("0"):
+                    is_oct = True
+                elif len(e) >= 3:
+                    try:
+                        int(e[:3], 8)
+                        is_oct = True
+                    except:
+                        pass
+
+                if is_oct:
+                    rest = e[3:]
+                    e = e[:3]
+                    val = int(e, 8)
+                    if val > 0xff:
+                        raise error(r"octal escape value \%s outside of range 0-0o377" % e.decode(), None, 0)
+                    return chr(val).encode() + rest
+
+                rest = e[2:]
+                e = e[:2]
+                gr = int(e)
+                if match._has_group(gr):
+                    return (match.group(gr) or b"") + rest
+                else:
+                    raise error("invalid group reference")
+            else:
+                r = _UNESCAPE_DICT.get(e)
+                if r is None:
+                    return b"\\" + e
+                return r
+
+            if gr.isdigit():
+                gr = int(gr)
+            return match.group(gr) or b""
+
+        return sub(r"\\(0[0-7]*|\d+|g<.+?>|.)", handle_escape, repl)
+
+    def subn(self, repl, s, count=0):
+>>>>>>> upstream/master
         is_str = isinstance(s, str)
         if is_str:
             s = s.encode()
 
         res = b""
         pos = 0
+<<<<<<< HEAD
         while True:
+=======
+        cnt_rpl = 0
+        finish = len(s)
+        while pos <= finish:
+>>>>>>> upstream/master
             m = self.search(s, pos)
             if not m:
                 res += s[pos:]
@@ -215,6 +274,10 @@ class PCREPattern:
                 res += self._handle_repl_escapes(repl, m)
             else:
                 res += repl
+<<<<<<< HEAD
+=======
+            cnt_rpl += 1
+>>>>>>> upstream/master
 
             pos = end
             if beg == end:
@@ -230,6 +293,13 @@ class PCREPattern:
 
         if is_str:
             res = res.decode()
+<<<<<<< HEAD
+=======
+        return (res, cnt_rpl)
+
+    def sub(self, repl, s, count=0):
+        res, cnt = self.subn(repl, s, count)
+>>>>>>> upstream/master
         return res
 
     def split(self, s, maxsplit=0):
@@ -273,7 +343,12 @@ class PCREPattern:
             s = s.encode()
 
         res = []
+<<<<<<< HEAD
         while True:
+=======
+        finish = len(s)
+        while pos <= finish:
+>>>>>>> upstream/master
             m = self.search(s, pos)
             if not m:
                 break
@@ -305,7 +380,8 @@ class PCREPattern:
         if endpos != -1:
             s = s[:endpos]
         res = []
-        while True:
+        finish = len(s)
+        while pos <= finish:
             m = self.search(s, pos)
             if not m:
                 break
@@ -364,6 +440,11 @@ def sub(pattern, repl, s, count=0, flags=0):
     return r.sub(repl, s, count)
 
 
+def subn(pattern, repl, s, count=0, flags=0):
+    r = compile(pattern, flags)
+    return r.subn(repl, s, count)
+
+
 def split(pattern, s, maxsplit=0, flags=0):
     r = compile(pattern, flags)
     return r.split(s, maxsplit)
@@ -389,3 +470,7 @@ def escape(s):
         else:
             res += "\\" + c
     return res
+
+
+def purge():
+    pass

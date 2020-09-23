@@ -1,6 +1,10 @@
 name = re
 srctype = pycopy-lib
 type = module
+<<<<<<< HEAD
 version = 0.9
+=======
+version = 0.9.4
+>>>>>>> upstream/master
 author = Paul Sokolovsky
 depends = ffilib

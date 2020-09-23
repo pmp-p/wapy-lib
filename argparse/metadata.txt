@@ -1,4 +1,8 @@
 srctype = pycopy-lib
 type = module
+<<<<<<< HEAD
 version = 0.5.1
+=======
+version = 0.5.2
+>>>>>>> upstream/master
 author = Damien George, Paul Sokolovsky

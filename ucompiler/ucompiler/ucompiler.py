@@ -60,6 +60,43 @@ class Compiler(ast.NodeVisitor):
         self.bc.add(opc.LOAD_CONST_NONE)
         self.bc.add(opc.RETURN_VALUE)
 
+<<<<<<< HEAD
+=======
+    def _visit_function(self, node):
+        args = node.args
+        assert args.vararg is None
+        assert not args.kwonlyargs
+        assert not args.kw_defaults
+        assert args.kwarg is None
+        assert not args.defaults
+
+        prev_symtab = self.symtab
+        prev_bc = self.bc
+        self.symtab = self.symtab_map[node]
+        self.bc = Bytecode()
+
+        self.stmt_list_visit(node.body)
+        self.bc.add(opc.LOAD_CONST_NONE)
+        self.bc.add(opc.RETURN_VALUE)
+
+        co = self.bc.get_codeobj()
+        co.co_name = node.name
+        co.co_filename = self.filename
+        co.co_argcount = len(args.args)
+        # Here mpy_stacksize corresponds to VM stack size, we also need there
+        # space for locals.
+        co.mpy_stacksize += len(self.symtab.locals)
+
+        self.bc = prev_bc
+        self.symtab = prev_symtab
+
+        self.bc.add(opc.MAKE_FUNCTION, co)
+        self._visit_var(node.name, ast.Store())
+
+    def visit_FunctionDef(self, node):
+        self._visit_function(node)
+
+>>>>>>> upstream/master
     def visit_Import(self, node):
         for n in node.names:
             self.bc.load_int(0)
@@ -73,6 +110,16 @@ class Compiler(ast.NodeVisitor):
             else:
                 self._visit_var(n.name.split(".", 1)[0], ast.Store())
 
+<<<<<<< HEAD
+=======
+    def visit_Return(self, node):
+        if node.value is None:
+            self.bc.add(opc.LOAD_CONST_NONE)
+        else:
+            self.visit(node.value)
+        self.bc.add(opc.RETURN_VALUE)
+
+>>>>>>> upstream/master
     def visit_Assign(self, node):
         self.visit(node.value)
         for t in node.targets[:-1]:

@@ -34,6 +34,7 @@ assert re.sub("a", "z", "caaab", 10) == "czzzb"
 assert re.sub(r"[ :/?&]", "_", "http://foo.ua/bar/?a=1&b=baz/") == "http___foo.ua_bar__a=1_b=baz_"
 assert re.sub("a", lambda m: m.group(0) * 2, "caaab") == "caaaaaab"
 
+<<<<<<< HEAD
 # zero-length matches
 assert re.sub('(?m)^(?!$)', '--', 'foo') == '--foo'
 assert re.sub('(?m)^(?!$)', '--', 'foo\n') == '--foo\n'
@@ -42,6 +43,20 @@ assert re.sub('(?m)^(?!$)', '--', 'foo\n\na') == '--foo\n\n--a'
 assert re.sub('(?m)^(?!$)', '--', 'foo\n\na', 1) == '--foo\n\na'
 assert re.sub('(?m)^(?!$)', '--', 'foo\n  \na', 2) == '--foo\n--  \na'
 
+=======
+# subn
+
+assert re.subn("b*", "x", "xyz") == ('xxxyxzx', 4)
+
+# zero-length matches
+assert re.sub('(?m)^(?!$)', '--', 'foo') == '--foo'
+assert re.sub('(?m)^(?!$)', '--', 'foo\n') == '--foo\n'
+assert re.sub('(?m)^(?!$)', '--', 'foo\na') == '--foo\n--a'
+assert re.sub('(?m)^(?!$)', '--', 'foo\n\na') == '--foo\n\n--a'
+assert re.sub('(?m)^(?!$)', '--', 'foo\n\na', 1) == '--foo\n\na'
+assert re.sub('(?m)^(?!$)', '--', 'foo\n  \na', 2) == '--foo\n--  \na'
+
+>>>>>>> upstream/master
 # split
 
 assert re.split('x*', 'foo') == ['foo']
@@ -77,6 +92,8 @@ text = "  \thello there\n  \t  how are you?"
 indents = _leading_whitespace_re.findall(text)
 assert indents == ['  \t', '  \t  ']
 
+assert re.findall(r"\b", "a") == ['', '']
+
 # handling of empty matches
 indent_re = re.compile('^([ ]*)(?=\S)', re.MULTILINE)
 s = "line number one\nline number two"
@@ -94,3 +111,5 @@ assert [item.group(0) for item in iter] == ["::", "::"]
 s = "line one\nline two\n   3"
 iter = re.finditer(r"^ *", s, re.MULTILINE)
 assert [m.group() for m in iter] == ["", "", "   "]
+
+assert [m.group() for m in re.finditer(r".*", "asdf")] == ["asdf", ""]

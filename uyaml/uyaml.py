@@ -98,6 +98,9 @@ class YamlParser:
                 return ret
             for i in range(len(self.pl)):
                 if self.pl[i] in seps:
+                    # foo:bar is a string
+                    if self.pl[i] == ":" and i < len(self.pl) - 1 and not self.pl[i + 1].isspace():
+                        continue
                     break
             else:
                 i += 1
@@ -202,7 +205,11 @@ def dump(data, stream, sort_keys=True, indent=0):
             dump(i, stream, sort_keys, indent + 1)
     elif isinstance(data, dict):
         it = data.items()
+<<<<<<< HEAD
         if sort:
+=======
+        if sort_keys:
+>>>>>>> upstream/master
             it = sorted(it)
         for k, v in it:
             do_indent(indent)

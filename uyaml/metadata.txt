@@ -1,6 +1,10 @@
 srctype = pycopy-lib
 type = module
+<<<<<<< HEAD
 version = 0.5
+=======
+version = 0.5.2
+>>>>>>> upstream/master
 author = Paul Sokolovsky
 desc = Simple parser for YAML subset for Pycopy.
 long_desc = Simple parser for YAML subset for the Pycopy project (https://github.com/pfalcon/pycopy).
