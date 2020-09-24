@@ -6,7 +6,8 @@ MICROPY_PY_UTIME_TICKS_PERIOD = 2**30
 _PASSTHRU = ("time", "sleep", "clock", "localtime")
 
 for f in _PASSTHRU:
-    globals()[f] = getattr(_time, f)
+    if hasattr(_time,f):
+        globals()[f] = getattr(_time, f)
 
 
 def sleep_ms(t):

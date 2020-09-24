@@ -1,11 +1,6 @@
 # ❯❯❯
-
-import pythons as use
-
-try:
-    import json
-except:
-    import ujson as json
+import sys
+import json
 
 DBG = 0
 
@@ -26,12 +21,8 @@ cycle = 1
 try:pdb
 except:pdb = print
 
-try:
-    from uasyncio import *
-except Exception as e:
-    embed.log(repr(e))
-
-
+import uasyncio
+from uasyncio import *
 
 loop = get_event_loop()
 
@@ -43,7 +34,6 @@ async def sleep_ms(ms):
 
 def finalize(*argv,**kw):
     pdb('30:','aio.finalize()')
-
 
 
 # TODO: pause only non critical coro
@@ -102,3 +92,37 @@ def step(*argv, **kw):
         pdb('58:aio broke #', failures,'at',cycle)
         sys.print_exception(e,sys.stderr)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#

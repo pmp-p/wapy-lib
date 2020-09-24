@@ -1,3 +1,6 @@
+# ❯❯❯
+
+
 # still to solve :
 
 # Python on android must use ashmem instead of shmem : https://bugs.python.org/issue31039
@@ -19,30 +22,33 @@ builtins.os = os
 builtins.embed = embed
 builtins.builtins = builtins
 
-builtins.__UPY__ =  (sys.implementation.name != 'cpython')
-#TODO: use embed.platform later to tell platform
-builtins.__EMSCRIPTEN__ = sys.platform in ('emscripten','wasm')
-builtins.__WASM__ = sys.platform in ('wasi')
 
-if not __UPY__:
-    import traceback
-
-builtins.use = sys.modules[__name__]
-lives = True
-
-def pdb(*argv, **kw):
-    kw["file"] = sys.stderr
-    print("\033[31mPYDEBUG>\033[0m ", *argv, **kw)
-
-builtins.pdb = pdb
 python3 = sys.modules[__name__]
 
 
 # no dll/so hook when in host "emulator"
 if not __UPY__:
+
+    # setup exception display with same syntax as upy
+    import traceback
+
+    def print_exception(e, out=sys.stderr, **kw):
+        kw["file"] = out
+        traceback.print_exc(**kw)
+
+    sys.print_exception = print_exception
+    del print_exception
+
+    # test for this implementation ctytpes support
+
+    try:
+        import ctypes
+    except Exception as e:
+        ctypes = None
+        sys.print_exception(e)
+
     if hasattr(sys, "getandroidapilevel"):
         builtins.__EMU__ = False
-        builtins.__ANDROID__ = True
         from .aosp import *
     else:
         print("running in host emulator or wasm")
@@ -50,15 +56,60 @@ if not __UPY__:
         builtins.__ANDROID__ = not __EMSCRIPTEN__
 
     try:
-        import ctypes
-        import os
 
-        if not __EMU__:
+        # javascript stdio
+        if __EMSCRIPTEN__:
+            import binascii
 
-            try:
-                builtins.libc = ctypes.CDLL("libc.so")
-            except OSError:
-                pass
+            original_stderr_fd = sys.stderr.fileno()
+            original_stdout_fd = sys.stdout.fileno()
+
+            class Redir(object):
+                def __init__(self, channel, file):
+                    self.channel = channel
+                    self._file = file  # no = fileno
+                    self.buf = []
+
+
+
+                def write(self, s):
+                    self.buf.append(s)
+                    # classic buffers behaviour
+                    # if self.buf[-1].find('\n')>=0:
+
+                    # wanted behaviour
+                    if self.buf[-1].endswith("\n"):
+                        self.flush()
+
+                def flush(self):
+                    s = "".join(self.buf)
+                    #s = s.replace("\n", "↲")  # ¶
+                    #s = s.replace("\n", "↲\r\n")
+                    s = s.replace("\n", "\r\n")
+                    if len(s):
+                        #embed.cout(f'"sys.{self.channel}" : "{s}"')
+                        value = binascii.hexlify(s.encode('utf-8')).decode('utf-8')
+                        sys.__stdout__.write( json.dumps( { 1 : value } ) )
+                        sys.__stdout__.write( "\n" )
+                        sys.__stdout__.flush()
+                    self.buf.clear()
+
+
+                def __getattr__(self, attr):
+                    if attr[0] == "_":
+                        return object.__getattribute__(self, attr)
+                    return getattr(self._file, attr)
+
+            sys.stdout = Redir("1", sys.stdout)
+            sys.stderr = Redir("2", sys.stderr)
+
+        # android stdio
+        elif not __EMU__:
+            if ctypes:
+                try:
+                    builtins.libc = ctypes.CDLL("libc.so")
+                except OSError:
+                    pass
 
             original_stderr_fd = sys.stderr.fileno()
             original_stdout_fd = sys.stdout.fileno()
@@ -93,12 +144,6 @@ if not __UPY__:
             sys.stdout = LogFile("stdout", sys.stdout)
             sys.stderr = LogFile("stderr", sys.stderr)
 
-        def print_exception(e, out=sys.stderr, **kw):
-            kw["file"] = out
-            traceback.print_exc(**kw)
-
-        sys.print_exception = print_exception
-        del print_exception
 
         try:
             # add the pip packages folder or in-apk
@@ -115,17 +160,17 @@ if not __UPY__:
                 sys.path.insert(ipos + 1, addsys.pop(0))
                 print(f" -> added {sys.path[ipos+1]}")
             del addsys
-
-            import Applications
-            Applications.onCreate(Applications, python3)
+            try:
+                import Applications
+                Applications.onCreate(Applications, python3)
+            except:
+                pass
 
             if not __EMU__:
                 for k in os.environ:
                     print(f"    {k} = '{os.environ[k]}'")
 
         except Exception as e:
-
-
             embed.log(f"FATAL: {__file__.split('assets/')[-1]} {e}")
             sys.print_exception(e)
 
@@ -137,11 +182,13 @@ if not __UPY__:
 
     import time as Time
 else:
-
     import utime as Time
 
-#import pythons.aio
+
 import pythons.aio.plink
+
+
+
 
 # TODO: in case of failure to create "Application" load a safe template
 # that could display the previous tracebacks
@@ -188,7 +235,6 @@ except Exception as e:
         sys.print_exception(e)
     except:
         embed.log("190: %r" % e )
-
 
 
 

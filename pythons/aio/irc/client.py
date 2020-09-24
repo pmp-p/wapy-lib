@@ -90,5 +90,5 @@ class client:
                 pdb(f"60:maybe could be missing 'android.permission.INTERNET' cap {self.state} ?")
                 break
             pdb("74: event.name?",case)
-            if not use.lives:
+            if not aio.loop:
                 break

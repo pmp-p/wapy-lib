@@ -4,7 +4,10 @@ See http://www.iana.org/time-zones/repository/tz-link.html for
 time zone and DST data sources.
 """
 
-import time as _time
+try:
+    import utime as _time
+except:
+    import time as _time
 import math as _math
 
 def _cmp(x, y):
@@ -1833,7 +1836,7 @@ class timezone(tzinfo):
 
     @classmethod
     def _create(cls, offset, name=None):
-        self = tzinfo.__new__(cls)
+        self = tzinfo(offset, name)
         self._offset = offset
         self._name = name
         return self

@@ -48,16 +48,20 @@ else:
         traceback.print_exc(**kw)
 
     sys.print_exception = print_exception
-    try:
-        import pythons
-        import pythons.fixes as fixes
-        pythons.fixes = fixes
-        sys.modules['time'] = fixme('utime')
-        print(utime, sys.modules['utime'])
-        fixes = ('micropython', 'machine', 'ctypes')  #contextvars is unsupported on micropython
-    except:
-        print("pythons.fixes not found")
-        fixes =()
+
+    import pythons
+    import pythons.fixes as fixes
+    pythons.fixes = fixes
+    sys.modules['time'] = fixme('utime')
+    print(utime, sys.modules['utime'])
+
+    #contextvars is unsupported on micropython
+
+    if __WASM__:
+        fixes = ('micropython', 'machine', 'signal')
+    else:
+        fixes = ('micropython', 'machine', 'ctypes')
+
 
 for fix in fixes:
     try:

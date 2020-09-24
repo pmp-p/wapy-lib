@@ -2,6 +2,7 @@
 
 import sys
 from ujson import loads, dumps
+
 import uasyncio
 from uasyncio import *
 
@@ -132,8 +133,8 @@ def await_for(coro, tmout):
     stop_at = int(Time.time() + tmout)
     fildes = id(coro)
     loop.create_task( Future(fildes, coro) )
-    lio[fildes] = undef
-    while lio.get(fildes) is undef:
+    lio[fildes] = undefined
+    while undefined(lio.get(fildes)):
         import aio_suspend
         if int(Time.time())>stop_at:
             print("136:await_for tmout")
@@ -150,7 +151,7 @@ def fsync(owner, coro, tmout ):
     loop.create_task( Future(fildes,coro) )
 
     stop_at = int(Time.time() + tmout)
-    while lio.get( fildes, undef) is undef:
+    while undefined(lio.get( fildes, undef)):
         import aio_suspend
         if int(Time.time())>stop_at:
             pdb("116:aio_fsync tmout")
@@ -244,5 +245,16 @@ class _(list):
         return self
 
 aio.ctx = _()
+
+
+flush = aio_suspend
+
+
+
+def websocket(*argv, **kw):
+    pdb("16: no async websocket provider")
+
+
+
 
 

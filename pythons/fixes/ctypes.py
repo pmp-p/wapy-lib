@@ -4,6 +4,8 @@ import embed
 CONST = lambda x:x
 print('4:#FIXME: parser and const!')
 
+# C/C++ compiler dependant
+NULLPT_SIZE = CONST(4)
 
 if __UPY__:
     import uctypes as this
@@ -44,8 +46,6 @@ else:
 
 
 
-
-# import embed
 
 # todo CFUNCTYPE should not be some prototype wrapper but a named function
 # eg _sdlsize = CFUNCTYPE(Sint64, POINTER(SDL_RWopsBase)) should be :
@@ -273,7 +273,7 @@ class CSpace:
             self.ref = struct.pack('P', 0 )
 
         self.type = iptr
-        self.val = undef
+        self.val = undefined
         self.size = PT_SIZE
 
 
@@ -349,7 +349,7 @@ class PT:
                 return
 
             c = self.__c
-            if c.val is undef:
+            if c.val is undefined:
                 print("__getattr__",attr)
                 pstruct = struct_field_get(c.type, self)
                 print("ctype.cast",pstruct)
@@ -402,8 +402,10 @@ def POINTER(ctype):
 
 
 class c_void_p(PT):
-    pass
-
+    if __UPY__:
+        pass
+    else:
+        in_dll = this.c_void_p.in_dll
 
 class c_char_p(PT):
     pass
@@ -418,9 +420,6 @@ py_object = "py_object"
 
 
 
-
-# C/C++ compiler dependant
-NULLPT_SIZE = const(4)
 
 
 c_null = ("v", NULLPT_SIZE, this.VOID)
@@ -456,12 +455,16 @@ ffisign = {
 }
 print("457:#FIXME:detect double build for floats")
 
+if __UPY__:
 
-class CFUNCTYPE:
-    __name__ = "CFUNCTYPE"
+    class CFUNCTYPE:
+        __name__ = "CFUNCTYPE"
 
-    def __init__(self, *argv, **kw):
-        self.argv = argv
+        def __init__(self, *argv, **kw):
+            self.argv = argv
+else:
+    pdb("459: CFUNCTYPE")
+    CFUNCTYPE = this.CFUNCTYPE
 
 
 def memmove(*argv, **kw):

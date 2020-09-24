@@ -234,7 +234,7 @@ class EventLoop:
             self.cur_task = cb
 
             try:
-                if argv is ():
+                if argv==():
                     ret = next(cb)
                 else:
                     ret = cb.send(*argv)

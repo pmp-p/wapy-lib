@@ -79,7 +79,7 @@ class CallPath(dict):
         self.__fqn = fqn
         self.__name = fqn.rsplit(".", 1)[-1]
         self.__host = host
-        self.__solved = undef
+        self.__solved = undefined
         self.__aself = None
 
         if not self in CallPath.aioq:
@@ -232,7 +232,7 @@ class CallPath(dict):
             try:
                 return self.__solved
             finally:
-                self.__solved = undef
+                self.__solved = undefined
 
     else:
         # uasyncio __await__ not called
@@ -263,7 +263,7 @@ class CallPath(dict):
 #            try:
 #                return self.__solved
 #            finally:
-#                self.__solved = undef
+#                self.__solved = undefined
         return self
 
 
@@ -515,7 +515,7 @@ else:
                     if DBG:
                         print("OID=",oid ,"solved=",solved ,"unsolved=", unsolved)
 
-                    if solved is not undef:
+                    if not undefined(solved):
                         if isinstance(unsolved,str) and len(unsolved):
                             solved = await self.get("%s.%s" % (oid, unsolved), None)
                             unsolved = ''

@@ -9,6 +9,7 @@ print('NB: this module [',__name__,'] is not for public release (yet)',file=sys.
 
 # I2C, https://github.com/pmp-p/I2C-Tiny-USB
 
-# arduino+ TinyPacks
+# arduino + TinyPacks
+# aruduino sim https://github.com/netpipe/IrrlichtDemos/tree/master/Apps/ArduinoSim
 
 # esp* board with (web)socket or UART

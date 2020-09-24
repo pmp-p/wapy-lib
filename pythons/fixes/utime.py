@@ -8,6 +8,11 @@ if sys.version_info[0:2]>(3,7):
     def clock():
         return _time.process_time()
     sleep = _time.sleep
+    # required by socketserver
+    monotonic = _time.monotonic
+
+    # required by email.utils.formatdate ( http server)
+    struct_time = _time.struct_time
 
 else:
     MICROPY_PY_UTIME_TICKS_PERIOD = const(2**30)
@@ -46,6 +51,9 @@ def ticks_diff(a, b):
     return ((a - b + MICROPY_PY_UTIME_TICKS_PERIOD // 2) & (MICROPY_PY_UTIME_TICKS_PERIOD - 1)) - MICROPY_PY_UTIME_TICKS_PERIOD // 2
 
 del f, attr
+
+def time_ns():
+    return int( _time.time() * 1_000_000_000)
 
 
 class Lapse:

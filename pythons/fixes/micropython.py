@@ -50,8 +50,12 @@ else:
 
     import builtins
 
-    import uio
-    builtins.open = uio.open
+    try:
+        import uio
+        builtins.open = uio.open
+    except:
+        pdb("cpython-uio not found", __import__('sys').path)
+
 
 
     import gc

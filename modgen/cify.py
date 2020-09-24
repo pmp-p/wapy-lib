@@ -170,7 +170,7 @@ def annotation_rt(ann):
 
     elif tc[0]=='_':
         tp = tc
-        tc  = tc.rsplit('_',1)[-1]
+        tc  = tc.rsplit('_from_',1)[-1]
         if tc=='ptr':
             tc= 'uintptr_t'
 
@@ -199,6 +199,8 @@ def block_from_c_value(prefix, rtp):
         body.append(f'{prefix} MP_OBJ_NEW_QSTR(qstr_from_str(__creturn__));')
     else:
         body.append(f'{prefix} (mp_obj_t)__creturn__ ;')
+    if prefix.count('{')==1:
+        return body[-1]+" }"
     return body[-1]
 
 
@@ -362,7 +364,12 @@ def build_method_code(cfunc, scope, rtc, rtp, fast_ret, with_finally = False):
         # late return final type
         body.append("return __preturn__;")
     else:
-        body.append( block_from_c_value(f'{lblname}: return', rtp) )
+        if ''.join(body).find(f'goto {lblname}')>0:
+            body.append( block_from_c_value(f'{lblname}: return', rtp) )
+        else:
+            body.append( block_from_c_value(f'return', rtp) )
+
+
     return body
 
     body.append('}')

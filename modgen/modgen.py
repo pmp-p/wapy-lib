@@ -26,13 +26,23 @@ def standard_c_header(**kw):
 #include "py/obj.h"
 #include "py/runtime.h"
 
+#ifndef STATIC
+#define STATIC static
+#endif
+
+
 #define None mp_const_none
 #define bytes(cstr) PyBytes_FromString(cstr)
 #define PyMethodDef const mp_map_elem_t
 #define PyModuleDef const mp_obj_module_t
-#define STATIC static
+
 #define mp_obj_get_double mp_obj_get_float
 #define mp_obj_new_int_from_ptr mp_obj_new_int_from_ull
+
+#define mp_obj_new_int_from_unsigned_long mp_obj_new_int_from_uint
+#define unsigned_long unsigned long
+
+
 
 """  % kw )
 

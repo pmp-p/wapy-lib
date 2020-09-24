@@ -1,4 +1,26 @@
+# this aio module try to add support for posix aio functions.
+
+
 import builtins, sys
+
+
+# if site.py did not patch it, get one
+try:
+    Time
+except:
+    try:
+        import utime as Time
+    except:
+        import time as Time
+    print("Using normal Time implementation :",Time)
+    builtins.Time = Time
+
+
+# still allow a module named that way
+sys.modules.pop('Time',None)
+
+def rtclock():
+    return int(Time.time()*1_000)
 
 aio = sys.modules[__name__]
 
@@ -15,8 +37,6 @@ sys.modules['aio'] = aio
 
 if __UPY__:
     from .upy.aio import *
-    def websocket(*argv, **kw):
-        pdb("16: no async websocket provider")
 
     # implementation provided builtins
     try:
@@ -26,6 +46,7 @@ if __UPY__:
         def suspend():
             print('27: aio_suspend N/I')
         builtins.aio_suspend = suspend
+
 else:
     from .cpy.aio import *
 
@@ -45,28 +66,8 @@ else:
             del sys.modules['aio_suspend']
             Time.sleep(.016)
 
-
     # implementation lacks
     builtins.aio_suspend = suspend
-
-
-# if site.py did not patch time get one
-try:
-    Time
-except:
-    try:
-        import utime as Time
-    except:
-        import time as Time
-    print("Using normal Time implementation :",Time)
-    builtins.Time = Time
-
-
-# still allow a module named that way
-sys.modules.pop('Time',None)
-
-# wasm does not have it, replace with green threading
-sys.modules['threading'] = aio
 
 # mark not started but no error
 aio.error = None
@@ -77,9 +78,7 @@ pstab = {}
 # https://docs.python.org/3/library/threading.html#threading.excepthook
 
 # a green thread
-# FIXME: fix wapy 882:BUG so target can be None too in preempt mode
-def rtclock():
-    return int(Time.time()*1_000)
+# FIXME: fix wapy BUG 882 so target can be None too in preempt mode
 
 class Thread:
     def __init__(self, group=None, target=None, name=None, args =(), kwargs={} ):
@@ -88,7 +87,7 @@ class Thread:
         self.kwargs = kwargs
         self.name = name
         self.slice = 0
-        self.last = rtclock()
+        self.last = aio.rtclock()
 
         if target:
             if hasattr(target,'run'):
@@ -108,7 +107,7 @@ class Thread:
             self.name = '%s-%s' % ( self.__class__.__name__, id(self) )
         self.status = None
 
-    async def runner(self,coro):
+    async def runner(self, coro):
         self.status = True
         try:
             async with aio.ctx(self.slice).call(coro):
@@ -117,17 +116,26 @@ class Thread:
             self.status = repr(e)
             sys.print_exception(e,sys.stderr)
 
-    def __iter__(self):
-        if self.status is True:
-            rtc = rtclock()
-            self.delta = (rtc - self.last) - self.slice
-            if self.delta<0:
-                self.delta = 0
-            yield from aio.sleep_ms( self.slice - int(self.delta/2) )
-            self.last = rtc
+    if __UPY__:
+        def __iter__(self):
+            if self.status is True:
+                rtc = aio.rtclock()
+                self.delta = (rtc - self.last) - self.slice
+                if self.delta<0:
+                    self.delta = 0
+                yield from aio.sleep_ms( self.slice - int(self.delta/2) )
+                self.last = rtc
+        __await__ = __iter__
+    else:
+        def __await__(self):
+            if self.status is True:
+                rtc = aio.rtclock()
+                self.delta = (rtc - self.last) - self.slice
+                if self.delta<0:
+                    self.delta = 0
+                yield from aio.sleep_ms( self.slice - int(self.delta/2) )
+                self.last = rtc
 
-
-    __await__=__iter__
 
     def rt(self, slice):
         self.slice = int(float( slice ) * 1_000)
@@ -157,15 +165,22 @@ class Thread:
         return self.status is True
 
 
+
+
+
+# wasm upy does not have it, maybe replace with green threading
+# sys.modules['threading'] = aio
+
+
+
 def service( srv , *argv, **kw ):
-    return Thread(group=None, target=srv, args=argv, kwargs=kw).start()
+    return aio.Thread(group=None, target=srv, args=argv, kwargs=kw).start()
 
 task = service
 create_task = loop.create_task
 
-
-
 def start(argv,env):
+    global paused
     if aio.error is True:
         return pdb("80: aio can't start with uncleared error")
 
@@ -175,8 +190,9 @@ def start(argv,env):
     try:
         corofn = getattr( __import__('__main__'), 'main' )
         embed.log(f"run async main : {corofn}")
-        loop.create_task( corofn(*argv, **env) )
+        loop.create_task( corofn(len(argv), argv, env) )
         aio.error = False
+        paused = False
     except Exception as e:
         aio.error = True
         embed.log(f"run async main failed : {e}")
@@ -188,12 +204,13 @@ except:
     def _shutdown(*argv,**kw):
         print("_shutdown")
 
-# =========================== AIO POSIX ================================
-if __EMSCRIPTEN__:
+if __UPY__ and __EMSCRIPTEN__:
     from .browser import *
 
 
-
+def run(main,**kw):
+    loop.create_task(main)
+    aio.error = False
 
 
 
