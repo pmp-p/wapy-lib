@@ -1,6 +1,4 @@
 #
-print('NB: this module [',__name__,'] is not for public release (yet)',file=sys.stderr)
-
 # Several devices for PC are being considered or implemented.
 # ==========================================================
 
@@ -13,3 +11,5 @@ print('NB: this module [',__name__,'] is not for public release (yet)',file=sys.
 # aruduino sim https://github.com/netpipe/IrrlichtDemos/tree/master/Apps/ArduinoSim
 
 # esp* board with (web)socket or UART
+
+# blue pill + tiny usb stack

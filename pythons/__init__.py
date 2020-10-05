@@ -6,9 +6,9 @@
 # be carefull order matter a lot in this file
 
 
-
 import sys
 import builtins
+
 builtins.sys = sys
 builtins.builtins = builtins
 
@@ -19,6 +19,38 @@ def pdb(*argv, **kw):
     kw["file"] = sys.stderr
     print("\033[31mPYDEBUG>\033[0m ", *argv, **kw)
 
+#
+#def log_reduce(argv,**kw):
+#    max = kw.pop('limit',35)
+#    lim = (max - 5) // 2
+#    for arg in argv:
+#        arg = str(arg)
+#        if lim and len(arg)>max:
+#            arg = "%s/.../%s" % ( arg[:lim] , arg[-lim:] )
+#
+#        print(arg,end=' ',file=sys.stderr)
+#    print('',file=sys.stderr)
+#
+#def pdb(*argv,**kw):
+#    sys.stdout.flush()
+#    sys.stderr.flush()
+#    if not isinstance(argv[0],str):
+#        argv=list(argv)
+#        print('[ %s ]' % argv.pop(0), end=' ', file=sys.stderr)
+#
+#    try:
+#        if argv[0].find('%')>=0:
+#            try:
+#                print(argv[0] % tuple(argv[1:]),file=sys.stderr)
+#            except:
+#                log_reduce(argv,**kw)
+#    except:
+#        log_reduce(argv,**kw)
+#
+#    finally:
+#        sys.stdout.flush()
+#        sys.stderr.flush()
+
 builtins.pdb = pdb
 
 
@@ -27,7 +59,7 @@ builtins.pdb = pdb
 try:
     __UPY__
 except:
-    builtins.__UPY__ =  hasattr(sys.implementation,'mpy')
+    builtins.__UPY__ = hasattr(sys.implementation, "mpy")
 
 try:
     __EMSCRIPTEN__
@@ -46,19 +78,18 @@ except:
     builtins.__ANDROID__ = hasattr(sys, "getandroidapilevel")
 
 
-
-
-# this should be done in site.py / main.c but that's not easy for cpython.
+# this should be done in site.py / main.c but that's not so easy for cpython.
 # last chance to do it since required by aio.*
 try:
     undefined
 except:
+
     class sentinel:
         def __bool__(self):
             return False
 
         def __repr__(self):
-            return '∅'
+            return "∅"
 
         def __nonzero__(self):
             return 0
@@ -66,25 +97,23 @@ except:
         def __call__(self, *argv, **kw):
             if len(argv) and argv[0] is self:
                 return True
-            print('Null Pointer Exception')
+            print("Null Pointer Exception")
 
     sentinel = sentinel()
     builtins.undefined = sentinel
     del sentinel
 
 
-
 # force use a fixed, tested version of uasyncio to avoid non-determinism
 if __UPY__:
 
-    sys.modules['sys'] = sys
-    sys.modules['builtins'] = builtins
+    sys.modules["sys"] = sys
+    sys.modules["builtins"] = builtins
     from . import uasyncio
 else:
     from . import uasyncio_cpy as uasyncio
 
-sys.modules['uasyncio'] = uasyncio
-
+sys.modules["uasyncio"] = uasyncio
 
 
 # check for embedding support or use an emulation from host script __main__ .
@@ -93,7 +122,7 @@ try:
     import embed
 except:
     print("WARNING: embed module not found, using __main__ for it", file=sys.stderr)
-    embed = __import__('__main__')
+    embed = __import__("__main__")
 
     try:
         embed.log
@@ -104,14 +133,12 @@ except:
         embed.log = print
 
 
-sys.modules['embed'] = embed
+sys.modules["embed"] = embed
 
 
-# import possible fixes leveraring various python implementations.
+# import possible fixes leveraging various python implementations.
 
 from . import fixes
-
-
 
 
 # aio is a vital component make sure it is wide access.
@@ -121,6 +148,7 @@ from .python3 import *
 
 # order last : this is expected to be a patched module
 import time
+
 builtins.time = time
 
 
@@ -133,18 +161,21 @@ builtins.time = time
 #
 
 
-pyc_jump = {'':undefined}
+pyc_jump = {"": undefined}
+
 
 def pycore(fn):
     global pyc_jump
     pyc_jump[fn.__name__] = fn
+
 
 builtins.pycore = pycore
 
 
 if __UPY__:
     import io
-    sys.modules['io'] = io
+
+    sys.modules["io"] = io
 
     core_argv = []
     core_kw = {}
@@ -152,66 +183,65 @@ if __UPY__:
     format_list = []
 
     def __excepthook__(type, exc, tb, **kw):
-        format_list = kw.get('format_list',[])
-        fn = kw.get('file')
-        ln = kw.get('line')
+        format_list = kw.get("format_list", [])
+        fn = kw.get("file")
+        ln = kw.get("line")
 
-        print("_"*45)
-        print('Traceback, most recent call : %s:%s' %( fn , ln ))
+        print("_" * 45)
+        print("Traceback, most recent call : %s:%s" % (fn, ln))
         while len(format_list):
-            print(format_list.pop(0),end='')
-        print("_"*45)
+            print(format_list.pop(0), end="")
+        print("_" * 45)
 
     excepthook = __excepthook__
 
     @pycore
     def pyc_test(*argv, **kw):
-        print('pyc_test (pythons.__init__:103):')
-        print('argv : ', argv)
-        print('kw : ', kw)
-        print('done')
-
+        print("pyc_test (pythons.__init__:103):")
+        print("argv : ", argv)
+        print("kw : ", kw)
+        print("done")
 
     # should be set only interactive mode and moved into traceback module
-#    last_type = None
-#    last_value = None
-#    last_traceback = None
+    #    last_type = None
+    #    last_value = None
+    #    last_traceback = None
 
     @pycore
     def pyc_excepthook(etype, exc, tb, **kw):
         # https://docs.python.org/3.8/library/traceback.html
-#        last_value = exc
-#        last_type = etype
+        #        last_value = exc
+        #        last_type = etype
         try:
             # FIXME: extracting that way may trips on inlined '\n'
             # ideally: make a list from C in "tb"
             buf = io.StringIO()
             sys.print_exception(exc, buf)
             buf.seek(0)
-            fn = '<stdin>'
+            fn = "<stdin>"
             ln = 1
-            for line in buf.read().split('\n'):
+            for line in buf.read().split("\n"):
                 ls = line.strip()
-                if not ls.startswith('Traceback '):
-                    format_list.append(line+'\r\n')
+                if not ls.startswith("Traceback "):
+                    format_list.append(line + "\r\n")
                 if ls and ls.startswith('File "'):
                     try:
-                        fn,ln = ls.split('", line ',1)
-                        ln = int(ln.split(',',1)[0])
+                        fn, ln = ls.split('", line ', 1)
+                        ln = int(ln.split(",", 1)[0])
                         fn = fn[7:-1]
                     except:
-                        fn = '<stdin>'
+                        fn = "<stdin>"
                         ln = 1
             excepthook(etype, exc, tb, file=fn, line=ln, format_list=format_list)
 
         except Exception as e:
-            print("_"*45)
+            print("_" * 45)
             sys.print_exception(exc)
             print()
             print("Got another exception while printing exception:")
-            print("_"*45)
+            print("_" * 45)
             sys.print_exception(e)
-            print("_"*45)
+            print("_" * 45)
         finally:
             format_list.clear()
 
@@ -221,7 +251,7 @@ if __UPY__:
     def core_py(fn):
         global pyc_jump, core_argv, core_kw
         fnex = pyc_jump.get(fn, undefined)
-        #print("(CorePy)%s(*%r,**%r) Calls" % (fn, core_argv, core_kw), fnex )
+        # print("(CorePy)%s(*%r,**%r) Calls" % (fn, core_argv, core_kw), fnex )
         try:
             return fnex(*core_argv, **core_kw)
         except:
@@ -231,8 +261,94 @@ if __UPY__:
             core_argv.clear()
 
     def core_pyv(v):
-        #print('(CorePy)added', v)
+        # print('(CorePy)added', v)
         core_argv.append(v)
 
     embed.set_ffpy(core_py)
     embed.set_ffpy_add(core_pyv)
+
+
+
+
+
+class _:
+
+    def __enter__(self):
+        embed.CLI()
+
+    def __exit__(self, type, value, traceback):
+        embed.STI()
+
+aio.block = _()
+
+class _:
+    def __enter__(self):
+        embed.os_hideloop()
+
+    def __exit__(self, type, value, traceback):
+        embed.os_showloop()
+
+aio.hide = _()
+
+
+class _:
+    def __enter__(self):
+        embed.os_showloop()
+
+    def __exit__(self, type, value, traceback):
+        embed.os_hideloop()
+aio.show = _()
+
+class aioctx:
+    def __init__(self, delta, coro):
+        self.coro = coro
+        self.tnext = Time.time() + delta
+        self.tmout = 0
+
+class _(list):
+    current = None
+
+    async def __aenter__(self):
+        if self.__class__.current is None:
+            self.__class__.current = aioctx(0, None)
+        self.append(  self.__class__.current )
+        self.__class__.current = None
+        if self[-1].coro is not None:
+            print("__aenter__ awaiting", self[-1].coro)
+            return await self[-1].coro
+        else:
+            print('__aenter__ no coro')
+            self.__class__.current = None
+            return self
+
+    async def __aexit__(self, type, value, traceback):
+        len(self) and self.pop()
+
+    def __enter__(self):
+        self.append(0)
+
+    def __exit__(self, type, value, traceback):
+        len(self) and self.pop()
+
+    def __bool__(self):
+        if self.__class__.current:
+            return True
+        if len(self) and self[-1]:
+            return True
+        return False
+
+    def __call__(self, frametime):
+        print('__call__', len(self), frametime )
+        self.__class__.current = aioctx(frametime, None)
+        return self
+
+    def call(self, coro) :
+        print('.call', len(self), coro )
+        if self.__class__.current is None:
+            self.__class__.current = aioctx(0, coro)
+        else:
+            self.__class__.current.coro = coro
+        #self.__class__.current.tmout = tmout
+        return self
+
+aio.ctx = _()

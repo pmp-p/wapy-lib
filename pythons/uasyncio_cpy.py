@@ -3,8 +3,21 @@ import asyncio
 import asyncio.futures as futures
 from asyncio import *
 
+import socket as usocket
+
+def socket(af=usocket.AF_INET):
+    sock = usocket.socket(af, usocket.SOCK_DGRAM)
+    sock.setblocking(False)
+    return sock
+
+
 
 OrgTask = Task
+
+core = udp = sys.modules[__name__]
+
+
+
 
 class Task(OrgTask):
 
@@ -99,3 +112,22 @@ class StreamWriter(OrgStreamWriter):
 
 
 asyncio.streams.StreamWriter = StreamWriter
+
+
+_event_loop = get_event_loop()
+
+
+def run_once(*argv,**kw):
+    global _event_loop
+    _event_loop.call_soon(_event_loop.stop)
+    _event_loop.run_forever()
+
+_event_loop.run_once = run_once
+
+
+def sleep_ms(t):
+    return sleep(float(t)/1_000)
+
+del run_once
+
+

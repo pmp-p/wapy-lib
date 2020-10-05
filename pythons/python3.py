@@ -22,17 +22,26 @@ builtins.os = os
 builtins.embed = embed
 builtins.builtins = builtins
 
-
-python3 = sys.modules[__name__]
-
+builtins.python3 = sys.modules[__name__]
 
 # no dll/so hook when in host "emulator"
 if not __UPY__:
+    import io
 
     # setup exception display with same syntax as upy
     import traceback
 
     def print_exception(e, out=sys.stderr, **kw):
+        try:
+            if hasattr(Applications.MainActivity,'cc') and out==sys.stderr:
+                buf = StringIO()
+                kw["file"] = buf
+                traceback.print_exc(**kw)
+                Applications.MainActivity.cc.send(buf)
+                return
+        except:
+            pass
+
         kw["file"] = out
         traceback.print_exc(**kw)
 
@@ -207,6 +216,10 @@ try:
 except:
 
     class Applications:
+
+        # empty module
+        MainActivity = type(sys)('MainActivity')
+
         @staticmethod
         def onCreate(self, pyvm):
             print("onCreate", pyvm)
@@ -254,7 +267,7 @@ def error(self, *msg):
 
 
 def dispatch(jsonargs):
-    global errored
+    global errored, python3
 
     if isinstance(jsonargs, str):
         method, argv = json.loads(jsonargs)
@@ -271,8 +284,9 @@ def dispatch(jsonargs):
                 try:
                     rv = getattr(Applications, method)(Applications, python3, *argv)
                 except Exception as e:
-                    errored = True
+                    errored.append( method )
                     try:
+                        print("290: dispatch(",method,") error",e)
                         sys.print_exception(e)
                     except:
                         embed.log("292: %r" % e )
@@ -317,8 +331,20 @@ def onui(apps, p3, *in_queue):
     if len(State.q_ui):
         print("onui", State.q_ui)
 
+def oncursor(apps, p3, e ):
+    print("oncursor", e)
+
 def onmouse(apps, p3, *in_queue ):
-    print(in_queue)
+    oid, etype, cx, cy = in_queue
+    clients = MainActivity.Events.ev.get(etype,{}).get(oid, [])
+    if len(clients):
+        e = {'type':etype,'clientX':cx,'clientY':cy}
+        for client in clients:
+            client( e )
+        print("dispatched !", e)
+        return
+    else:
+        print("dispatch->onmouse",in_queue)
 
 
 def on_step(apps, p3):
@@ -327,7 +353,7 @@ def on_step(apps, p3):
 
     if OneSec:
         wall_s += 1
-        if wall_s == 3 and not tested:
+        if wall_s == 2 and not tested:
             if os.path.isdir(f"assets/python{sys.version_info.major}.{sys.version_info.minor}/test"):
                 print("starting testsuite")
                 import test.__main__
@@ -354,5 +380,8 @@ try:
         if not hasattr(Applications, attr):
             setattr(Applications, attr, getattr(python3,attr) )
 
+    builtins.Applications = Applications
 except:
     builtins.Applications = python3
+
+

@@ -62,6 +62,8 @@ except:
 
 
 if __EMSCRIPTEN__:
+    import embed
+
     wall_init = embed.time_ms()
 
     def wait_ms(argv):
@@ -73,8 +75,6 @@ if __EMSCRIPTEN__:
     def ticks_ms():
         global init_ms
         return embed.time_ms() - wall_init
-
-    import embed
 
     embed.log("81: #FIXME: uasyncio/__init__.py with time.time_ns() PEP 564")
     # https://www.python.org/dev/peps/pep-0564/
