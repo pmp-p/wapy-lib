@@ -9,6 +9,7 @@ import dis
 import six
 import sys
 
+MONITOR = 0
 
 def make_cell(value):
     # Thanks to Alex Gaynor for help with this bit of twistiness.
@@ -16,6 +17,114 @@ def make_cell(value):
     # and grabbing the cell object out of the function we create.
     fn = (lambda x: lambda: x)(value)
     return fn.__closure__[0]
+
+
+class xFunction(object):
+    __slots__ = [
+        'func_code', 'func_name', 'func_defaults', 'func_globals',
+        'func_locals', 'func_dict', 'func_closure',
+        '__name__', '__dict__', '__doc__',
+        '_vm', '_func',
+    ]
+
+    def __init__(self, name, code, globs, defaults, kwdefaults, closure, vm):
+        self._vm = vm
+        self.func_code = code
+        self.func_name = self.__name__ = name or code.co_name
+        self.func_defaults = defaults
+        self.func_globals = globs
+        self.func_locals = self._vm.frame.f_locals
+        self.__dict__ = {}
+        self.func_closure = closure
+        self.__doc__ = code.co_consts[0] if code.co_consts else None
+
+        # Sometimes, we need a real Python function.  This is for that.
+        kw = {
+            'argdefs': self.func_defaults,
+        }
+        if closure:
+            kw['closure'] = tuple(make_cell(0) for _ in closure)
+        self._func = types.FunctionType(code, globs, **kw)
+
+    def __repr__(self):         # pragma: no cover
+        return '<Function %s at 0x%08x>' % (
+            self.func_name, id(self)
+        )
+
+    def __get__(self, instance, owner):
+        if instance is not None:
+            return Method(instance, owner, self)
+        return self
+
+    def __call__(self, *args, **kwargs):
+        global MONITOR
+        if MONITOR:
+            print("103:",self.__name__,argv,kw)
+
+        if re.search(r'<(?:listcomp|setcomp|dictcomp|genexpr)>$', self.func_name):
+            # D'oh! http://bugs.python.org/issue19611 Py2 doesn't know how to
+            # inspect set comprehensions, dict comprehensions, or generator
+            # expressions properly.  They are always functions of one argument,
+            # so just do the right thing.  Py3.4 also would fail without this
+            # hack, for list comprehensions too. (Haven't checked for other 3.x.)
+            assert len(args) == 1 and not kwargs, "Surprising comprehension!"
+            callargs = {".0": args[0]}
+        else:
+                callargs = inspect.getcallargs(self._func, *args, **kwargs)
+        frame = self._vm.make_frame(
+            self.func_code, callargs, self.func_globals, {}, self.func_closure
+        )
+        CO_GENERATOR = 32           # flag for "this code uses yield"
+        if self.func_code.co_flags & CO_GENERATOR:
+            gen = Generator(frame, self._vm)
+            frame.generator = gen
+            retval = gen
+        else:
+            if self._vm.ASYNC: # and ( not len(self._vm.AS_CALL)):
+                #print("  ----------------- !!!!!!!!!!! ------------------ ")
+                self._vm.AS_CALL.append( self._vm.run_frame(frame) )
+                return None
+            retval = self._vm.run_sub_frame(frame)
+        return retval
+
+
+class xMethod(object):
+    def __init__(self, obj, _class, func):
+        self.im_self = obj
+        self.im_class = _class
+        self.im_func = func
+
+    def __repr__(self):         # pragma: no cover
+        name = "%s.%s" % (self.im_class.__name__, self.im_func.func_name)
+        if self.im_self is not None:
+            return '<Bound Method %s of %s>' % (name, self.im_self)
+        else:
+            return '<Unbound Method %s>' % (name,)
+
+    def __call__(self, *argv, **kw):
+
+        if len(argv) and (argv[0] is undefined):
+            print("re-routing","Method.__call__ -> async",argv,kw)
+            try:
+                if self.im_self is not None:
+                    self.im_func._vm.AS_CALL.append( self.im_func(self.im_self, *argv[1:], **kw) )
+                else:
+                    self.im_func._vm.AS_CALL.append( self.im_func(*argv[1:], **kw ))
+
+                # we could return an __init__() so send None
+                # call_function will add the missing retval
+                # self.im_func._vm.AS_CALL.append(None)
+                return None
+
+            finally:
+                print("routed !", self.im_func._vm.AS_CALL )
+
+        if self.im_self is not None:
+            return self.im_func(self.im_self, *argv, **kw)
+        else:
+            return self.im_func(*argv, **kw)
+
+
 
 
 class Function(object):
@@ -55,17 +164,13 @@ class Function(object):
             return Method(instance, owner, self)
         return self
 
-    def __call__(self, *args, **kwargs):
-        if re.search(r'<(?:listcomp|setcomp|dictcomp|genexpr)>$', self.func_name):
-            # D'oh! http://bugs.python.org/issue19611 Py2 doesn't know how to
-            # inspect set comprehensions, dict comprehensions, or generator
-            # expressions properly.  They are always functions of one argument,
-            # so just do the right thing.  Py3.4 also would fail without this
-            # hack, for list comprehensions too. (Haven't checked for other 3.x.)
-            assert len(args) == 1 and not kwargs, "Surprising comprehension!"
-            callargs = {".0": args[0]}
-        else:
-                callargs = inspect.getcallargs(self._func, *args, **kwargs)
+    def __call__(self, *argv, **kw):
+        global MONITOR
+        if MONITOR:
+            print("103:",self.__name__,argv,kw)
+
+        callargs = inspect.getcallargs(self._func, *argv, **kw)
+
         frame = self._vm.make_frame(
             self.func_code, callargs, self.func_globals, {}, self.func_closure
         )
@@ -75,12 +180,25 @@ class Function(object):
             frame.generator = gen
             retval = gen
         else:
-            if self._vm.ASYNC: # and ( not len(self._vm.AS_CALL)):
-                #print("  ----------------- !!!!!!!!!!! ------------------ ")
-                self._vm.AS_CALL.append( self._vm.run_frame(frame) )
+            retval = self._vm.run_frame(frame)
+
+            if MONITOR:
+                print(f"  ------ !!!!! new frame {self._func} !!! -------- ")
+
+            if self._vm.AS:
+                self._vm.AS_CALL.append( retval )
                 return None
-            retval = self._vm.run_sub_frame(frame)
+
         return retval
+
+
+class Native(object):
+    def __init__(self, instance, func ):
+        self._self = instance
+        self._func = func
+
+    def __call__(self,*argv,**kw):
+        return self._func(self._self,*argv,**kw)
 
 
 class Method(object):
@@ -90,33 +208,36 @@ class Method(object):
         self.im_func = func
 
     def __repr__(self):         # pragma: no cover
+        vm = self.im_func._vm
+
+        if vm.exporter:
+
+            sid = str(id(self))
+            vm.AS_RES[sid] = Native(self.im_self, self.im_func._func)
+            return sid
+
         name = "%s.%s" % (self.im_class.__name__, self.im_func.func_name)
         if self.im_self is not None:
-            return '<Bound Method %s of %s>' % (name, self.im_self)
+            #return '<Bound AS_Method %s of %s>' % (name, self.im_self)
+            return '<Bound AS_Method(%s) of %s>' % (self.im_func._func, self.im_self)
         else:
-            return '<Unbound Method %s>' % (name,)
+            return '<Unbound AS_Method %s>' % (name,)
 
     def __call__(self, *argv, **kw):
-        if len(argv) and (argv[0] is undefined):
-            print("re-routing","Method.__call__ -> async",argv,kw)
-            try:
-                if self.im_self is not None:
-                    self.im_func._vm.AS_CALL.append( self.im_func(self.im_self, *argv[1:], **kw) )
-                else:
-                    self.im_func._vm.AS_CALL.append( self.im_func(*argv[1:], **kw ))
+        global MONITOR
 
-                # we could return an __init__() so send None
-                # call_function will add the missing retval
-                # self.im_func._vm.AS_CALL.append(None)
-                return None
-
-            finally:
-                print("routed !", self.im_func._vm.AS_CALL )
+        if self.im_func.__name__.find('update')>=0:
+            MONITOR += 1
 
         if self.im_self is not None:
-            return self.im_func(self.im_self, *argv, **kw)
+            retval= self.im_func(self.im_self, *argv, **kw)
         else:
-            return self.im_func(*argv, **kw)
+            retval= self.im_func(*argv, **kw)
+
+        if MONITOR:
+            print("153:__call__", self.im_func.__name__, retval )
+        return retval
+
 
 
 

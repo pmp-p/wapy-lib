@@ -253,6 +253,11 @@ class VirtualMachine(vm_TRY_FINALLY):
 
     # https://rokups.github.io/#!pages/python3-asyncio-sync-async.md
 
+    # asterpreter or not
+    AS = 0
+
+    exporter = 0
+
     AS_DELAYED = object()
 
     READY = False
@@ -263,9 +268,36 @@ class VirtualMachine(vm_TRY_FINALLY):
 
     AS_RES = {}
 
+
+
     if not 'sync' in sys.argv:
 
         ASYNC = True
+
+#        def __enter__(self,*a,**k):
+#            self.export += 1
+#
+#        def __exit__(self,*a,**k):
+#            self.export -= 1
+
+        def export(self, fn, *argv, **kw):
+            VirtualMachine.exporter += 1
+            try:
+                sid = repr(fn)
+                native = VirtualMachine.AS_RES.pop(sid)
+                if asyncio.iscoroutinefunction(native._func):
+                    print("289: exporting coro")
+                    if len(argv):
+                        argv = list(argv)
+                        argv.insert(0, native._self)
+                        return native._func(*argv, **kw)
+                    else:
+                        return native._func(native._self, **kw)
+                return native
+
+            finally:
+                VirtualMachine.exporter -= 1
+
 
         async def run_frame_meta(self, frame, meta):
             await self.run_frame(frame)
@@ -309,12 +341,13 @@ class VirtualMachine(vm_TRY_FINALLY):
                     self.sliceOperator(byteName)
                     continue
 
+                bytecode_fn = getattr(self, "byte_%s" % byteName, None)
+
+                if not bytecode_fn:  # pragma: no cover
+                    raise VirtualMachineError("unknown bytecode type: %s" % byteName)
+
                 try:
                     # dispatch
-
-                    bytecode_fn = getattr(self, "byte_%s" % byteName, None)
-                    if not bytecode_fn:  # pragma: no cover
-                        raise VirtualMachineError("unknown bytecode type: %s" % byteName)
 
                     if bytecode_fn is self.byte_IMPORT_NAME:
                         if self.ASYNC and (arguments[0] == 'aio_suspend'):
@@ -331,7 +364,6 @@ class VirtualMachine(vm_TRY_FINALLY):
 
                     if len(VirtualMachine.AS_BUILD):
                         coro = VirtualMachine.AS_BUILD.pop()
-                        #VirtualMachine.AS_RES[coro] = await coro
                         retval = await coro
                         self.push( retval )
                         print('    < async pushed', retval )
@@ -354,7 +386,7 @@ class VirtualMachine(vm_TRY_FINALLY):
                         continue
 
                 except Exception as e:
-                    print("VMERROR", self.frame, byteName,'(',*arguments,end=' )\n')
+                    print("VMERROR", frame, byteName,'(',*arguments,end=' )\n')
                     sys.print_exception(e)
 
                     # deal with exceptions encountered while executing the op.
@@ -383,7 +415,8 @@ class VirtualMachine(vm_TRY_FINALLY):
 
             if why == "exception":
                 print( "RERAISE :",*self.last_exception)
-                raise self.last_exception[1]
+                #raise self.last_exception[1]
+                aio.loop.stop()
 
             return self.return_value
 
@@ -1545,15 +1578,18 @@ class VirtualMachine(vm_TRY_FINALLY):
 
 
 
-async def async_run_code(self, code, f_globals=None, f_locals=None):
-    frame = self.make_frame(code, f_globals=f_globals, f_locals=f_locals)
-    val = await self.run_frame(frame)
-    # Check some invariants
-    if self.frames:  # pragma: no cover
-        raise VirtualMachineError("Frames left over!")
-    if self.frame and self.frame.stack:  # pragma: no cover
-        raise VirtualMachineError("Data left on stack! %r" % self.frame.stack)
+async def async_run_code(vm, code, f_globals=None, f_locals=None):
+    vm.AS = 1
+    frame = vm.make_frame(code, f_globals=f_globals, f_locals=f_locals)
+    val = await vm.run_frame(frame)
 
+    # Check some invariants
+    if vm.frames:  # pragma: no cover
+        raise VirtualMachineError("Frames left over!")
+
+    if vm.frame and vm.frame.stack:  # pragma: no cover
+        raise VirtualMachineError("Data left on stack! %r" % vm.frame.stack)
+    vm.AS = 0
     return val
 
 
@@ -1581,6 +1617,7 @@ if __name__ == '__main__':
 
     # Execute the source file.
     vm = VirtualMachine()
+    builtins.exports = vm
 
     print("\n"*8)
     print(f"Welcome to Python{sys.version.split(' ',1)[0]}+1 async={vm.ASYNC}\n\n")
@@ -1618,7 +1655,7 @@ if __name__ == '__main__':
         aio.loop.create_task( async_io_render(vm) )
         aio.loop.create_task( async_run_code(vm, code, f_globals=main_mod.__dict__) )
 
-        if 0:
+        if 1:
             sys.path.append('/data/git/aioprompt')
             import aioprompt
             aioprompt.schedule(aioprompt.step, 1)
