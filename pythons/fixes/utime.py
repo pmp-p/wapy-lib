@@ -1,8 +1,8 @@
 
 
+MICROPY_PY_UTIME_TICKS_PERIOD = const(2**30)
 
-if sys.version_info[0:2]>(3,7):
-    MICROPY_PY_UTIME_TICKS_PERIOD = 2**30
+if not __UPY__: #sys.version_info[0:2]>(3,6):
     import time as _time
     attr = ("time", "sleep", "process_time", "localtime")
     def clock():
@@ -15,7 +15,6 @@ if sys.version_info[0:2]>(3,7):
     struct_time = _time.struct_time
 
 else:
-    MICROPY_PY_UTIME_TICKS_PERIOD = const(2**30)
     import embed
     import utime as _time
 

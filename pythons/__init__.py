@@ -111,6 +111,8 @@ if __UPY__:
     sys.modules["builtins"] = builtins
     from . import uasyncio
 else:
+    # fix const without writing const in that .py because of micropython parser.
+    exec("__import__('builtins').const = lambda x:x", globals(), globals() )
     from . import uasyncio_cpy as uasyncio
 
 sys.modules["uasyncio"] = uasyncio

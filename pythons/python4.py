@@ -9,12 +9,25 @@
 # python3+1 bidouillé par pmp-p https://github.com/pydk
 
 
-
 import sys
 import dis
 import linecache  # for print_frames
 import operator
 import types
+
+sys.path.append('.')
+
+if 1:
+    import pygame
+    import pickle
+    import math
+    import random
+    import os
+
+    pygame.init()
+    pygame.font.init()
+    pygame.display.set_mode((1,1))
+
 
 import asyncio
 
@@ -29,7 +42,8 @@ from pythons.pyobj import Frame, Block, Method, Function, Generator, Cell
 
 byteint = lambda b: b
 
-sync = 0
+
+MONITOR = 0
 
 
 if __debug__:
@@ -77,62 +91,32 @@ pending = {}
 
 class VirtualMachineError(Exception):
     """For raising errors in the operation of the VM."""
-
     pass
 
 
-#        if 0:
-#            async def resume_frame(self, frame):
-#                frame.f_back = self.frame
-#                val = await self.run_frame(frame)
-#                frame.f_back = None
-#                return val
-#
-#
-#        if 0:  # Not in py2.7
-#
-#            def byte_SET_LINENO(self, lineno):
-#                self.frame.f_lineno = lineno
-#
-#
-#        if 0:  # Not in py2.7
-#
-#            def byte_JUMP_IF_TRUE(self, jump):
-#                val = self.top()
-#                if val:
-#                    self.jump(jump)
-#
-#            def byte_JUMP_IF_FALSE(self, jump):
-#                val = self.top()
-#                if not val:
-#                    self.jump(jump)
-
-
-def build_metacell(meta, cell):
+def sync_metacell(meta, cell):
     meta = list(meta)
     metaclass = meta.pop(0)
     cls = metaclass(*meta)
 
     if isinstance(cell, Cell):
         cell.set(cls)
-    print("     > as_build_func METACLASS:", cell, cls)
+    print("      > as_build_func METACLASS:", cell, cls)
     return cls
 
-async def as_build_func(frame, meta, func ):
-    ctor = func._vm.run_frame(frame)
-    print("\n"*2)
+async def build_metacell(meta, cell):
+    meta = list(meta)
+    metaclass = meta.pop(0)
+    cls = metaclass(*meta)
 
-    print('    +as_build_func', ctor, func)
-    #t = time.time()
-    cell = await ctor
-    #await aio.sleep(2)
-    #print("ctor?", int( time.time() -t ) )
-
-    return build_metacell(meta,cell)
-
-
+    if isinstance(cell, Cell):
+        cell.set(cls)
+    print("      > as_build_func METACLASS:", cell, cls)
+    return cls
 
 def build_class( func, name, *bases, **kwds):
+    global MONITOR
+    print("      > build_class", func, bases, kwds)
 
     if not isinstance(func, Function):
         raise TypeError("func must be a function")
@@ -170,25 +154,22 @@ def build_class( func, name, *bases, **kwds):
     # do here (except we invoke our VirtualMachine instead of CPython's).
     frame = func._vm.make_frame(func.func_code, f_globals=func.func_globals, f_locals=namespace, f_closure=func.func_closure)
 
-    #meta = (metaclass, name, bases, namespace, )
+    meta = (metaclass, name, bases, namespace, )
+    try:
+        if VirtualMachine.ASYNC:
+            retval = func._vm.run_frame_meta(frame, meta)
+            VirtualMachine.AS_BUILD.append( retval )
+        else:
+            #sync
+            #print('  +sync', frame, func, meta)
+            cell = func._vm.run_frame(frame)
+            retval = sync_metacell(meta, cell)
 
-    if VirtualMachine.ASYNC:
-        print("     > frame",frame)
+        return retval
+    finally:
+        print('      < build_class =', retval )
+        #MONITOR -= 1
 
-        return as_build_func(frame, meta, func)
-
-    #sync
-    print('    +sync', func , func._vm)
-    cell = func._vm.run_frame(frame)
-
-    #return build_metacell(meta, cell)
-
-    cls = metaclass(name, bases, namespace)
-    if isinstance(cell, Cell):
-        cell.set(cls)
-    print("     > sync METACLASS:", cls)
-    print('    -sync')
-    return cls
 
 async def spin_res(vm, result):
     vm.lock()
@@ -199,54 +180,194 @@ async def spin_res(vm, result):
 
 
 
+class vm_TRY_FINALLY(object):
 
-class VirtualMachine(object):
+    # https://bugs.python.org/issue33387
+
+    # explain https://bugs.python.org/issue32949
+    # PR https://github.com/python/cpython/pull/6641
+
+
+    def byte_BEGIN_FINALLY(self):
+        raise VirtualMachineError("N/I")
+
+    def byte_SETUP_FINALLY(self, dest):
+        self.push_block("finally", dest)
+
+    def byte_WITH_CLEANUP_START(self):
+        u = self.top()
+        v = None
+        w = None
+        if u is None:
+            exit_method = self.pop(1)
+        elif isinstance(u, str):
+            if u in {"return", "continue"}:
+                exit_method = self.pop(2)
+            else:
+                exit_method = self.pop(1)
+        elif issubclass(u, BaseException):
+            w, v, u = self.popn(3)
+            tp, exc, tb = self.popn(3)
+            exit_method = self.pop()
+            self.push(tp, exc, tb)
+            self.push(None)
+            self.push(w, v, u)
+            block = self.pop_block()
+            assert block.type == "except-handler"
+            self.push_block(block.type, block.handler, block.level - 1)
+
+        res = exit_method(u, v, w)
+        self.push(u)
+        self.push(res)
+
+    def byte_WITH_CLEANUP_FINISH(self):
+        res = self.pop()
+        u = self.pop()
+        if type(u) is type and issubclass(u, BaseException) and res:
+            self.push("silenced")
+
+    def byte_END_FINALLY(self):
+        v = self.pop()
+        if isinstance(v, str):
+            why = v
+            if why in ("return", "continue"):
+                self.return_value = self.pop()
+            if why == "silenced":  # PY3
+                block = self.pop_block()
+                assert block.type == "except-handler"
+                self.unwind_block(block)
+                why = None
+        elif v is None:
+            why = None
+        elif issubclass(v, BaseException):
+            exctype = v
+            val = self.pop()
+            tb = self.pop()
+            self.last_exception = (exctype, val, tb)
+            why = "reraise"
+        else:  # pragma: no cover
+            raise VirtualMachineError("Confused END_FINALLY")
+        return why
+
+class VirtualMachine(vm_TRY_FINALLY):
+
+    # https://rokups.github.io/#!pages/python3-asyncio-sync-async.md
+
+    AS_DELAYED = object()
 
     READY = False
 
-    ASTACK = []
+    AS_BUILD = []
 
-    if 0:
+    AS_CALL = []
+
+    AS_RES = {}
+
+    if not 'sync' in sys.argv:
+
         ASYNC = True
 
+        async def run_frame_meta(self, frame, meta):
+            await self.run_frame(frame)
+            async_result = self.return_value
+            self.return_value = await build_metacell(meta, self.return_value)
+            try:
+                return self.return_value
+            finally:
+                print('    < async build_class/run_frame_meta =', self.return_value, async_result)
+
+
+        #async def run_sub_frame(self, frame):
+        #    return await self.run_frame(frame)
+
         async def run_frame(self, frame):
+            global MONITOR
             #
-            await asyncio.sleep(0)
+            #await asyncio.sleep(0)
             #
+            why = None
+
             self.push_frame(frame)
+
             while not aio.loop.is_closed():
+                why = None
                 byteName, arguments, opoffset = self.parse_byte_and_args()
-                if log.isEnabledFor(logging.INFO):
-                    self.log(byteName, arguments, opoffset)
 
-                # When unwinding the block stack, we need to keep track of why we
-                # are doing it.
-                why = self.dispatch(byteName, arguments)
+                if byteName.startswith("UNARY_"):
+                    self.unaryOperator(byteName[6:])
+                    continue
 
-                if why is not None:
-                    if asyncio.iscoroutine(why):
-                        argv,kw = pending.pop(why)
-                        print("\n  +awaiting why:", why, argv,kw)
-                        why = await why
-                        print("  > awaited why :", why )
-                        try:
-                            ctor = why(undefined,*argv,**kw)
-                        except TypeError as e:
-                            print("  > instance ctor :", ctor, e )
+                if byteName.startswith("BINARY_"):
+                    self.binaryOperator(byteName[7:])
+                    continue
 
-                        async_init = self.ASTACK.pop()
-                        print("  > awaiting ctor :", async_init )
-                        why = await async_init
+                if byteName.startswith("INPLACE_"):
+                    self.inplaceOperator(byteName[8:])
+                    continue
 
-                        print(' -async', ctor,'->', why)
+                if "SLICE+" in byteName:
+                    self.sliceOperator(byteName)
+                    continue
 
+                try:
+                    # dispatch
 
-                if why == "exception":
+                    bytecode_fn = getattr(self, "byte_%s" % byteName, None)
+                    if not bytecode_fn:  # pragma: no cover
+                        raise VirtualMachineError("unknown bytecode type: %s" % byteName)
+
+                    if bytecode_fn is self.byte_IMPORT_NAME:
+                        if self.ASYNC and (arguments[0] == 'aio_suspend'):
+                            print("dispatch-async aio_suspend spin==", why)
+                            why = spin_res(bytecode_fn(*arguments))
+
+                    elif byteName.startswith('CALL_'):
+                        if MONITOR:
+                            print("  ? a/sync", bytecode_fn.__name__, *arguments)
+                        why = bytecode_fn(*arguments)
+
+                    else:
+                        why = bytecode_fn(*arguments)
+
+                    if len(VirtualMachine.AS_BUILD):
+                        coro = VirtualMachine.AS_BUILD.pop()
+                        #VirtualMachine.AS_RES[coro] = await coro
+                        retval = await coro
+                        self.push( retval )
+                        print('    < async pushed', retval )
+                        continue
+
+                    if why is VirtualMachine.AS_DELAYED:
+                        # maybe injected result
+                        instance = VirtualMachine.AS_CALL.pop()
+
+                        # late call_function
+                        coro = VirtualMachine.AS_CALL.pop(0)
+
+                        # if the underlying ctor is calling __init__ as a coro
+                        # return None is expected here.
+
+                        retval = await coro or instance
+                        self.push(retval)
+
+                        #print('  - async', coro, ' ==> ', retval)
+                        continue
+
+                except Exception as e:
+                    print("VMERROR", self.frame, byteName,'(',*arguments,end=' )\n')
+                    sys.print_exception(e)
+
+                    # deal with exceptions encountered while executing the op.
+                    self.last_exception = sys.exc_info()[:2] + (None,)
+                    log.exception("Caught exception during execution")
+
                     # TODO: ceval calls PyTraceBack_Here, not sure what that does.
-                    pass
+                    why = "exception"
+                    break
 
                 if why == "reraise":
                     why = "exception"
+                    break
 
                 if why != "yield":
                     while why and frame.block_stack:
@@ -262,7 +383,6 @@ class VirtualMachine(object):
 
             if why == "exception":
                 print( "RERAISE :",*self.last_exception)
-                #six.reraise(*self.last_exception)
                 raise self.last_exception[1]
 
             return self.return_value
@@ -272,15 +392,65 @@ class VirtualMachine(object):
         ASYNC = False
 
         def run_frame(self, frame):
+            global MONITOR
+
+            why = None
             self.push_frame(frame)
+
+
             while True:
+
+                why = None
+
                 byteName, arguments, opoffset = self.parse_byte_and_args()
                 if log.isEnabledFor(logging.INFO):
                     self.log(byteName, arguments, opoffset)
 
+
+                if byteName.startswith("UNARY_"):
+                    self.unaryOperator(byteName[6:])
+                    continue
+
+                if byteName.startswith("BINARY_"):
+                    self.binaryOperator(byteName[7:])
+                    continue
+
+                if byteName.startswith("INPLACE_"):
+                    self.inplaceOperator(byteName[8:])
+                    continue
+
+                if "SLICE+" in byteName:
+                    self.sliceOperator(byteName)
+                    continue
+
                 # When unwinding the block stack, we need to keep track of why we
                 # are doing it.
-                why = self.dispatch(byteName, arguments)
+
+                try:
+                    # dispatch
+                    bytecode_fn = getattr(self, "byte_%s" % byteName, None)
+                    if not bytecode_fn:  # pragma: no cover
+                        raise VirtualMachineError("unknown bytecode type: %s" % byteName)
+
+
+                    if bytecode_fn is self.byte_IMPORT_NAME:
+                        if arguments[0] == 'aio_suspend':
+                            print("N/A dispatch-async aio_suspend spin==", why)
+
+                    elif byteName.startswith('CALL_'):
+                        if MONITOR:print("  ? a/sync", bytecode_fn.__name__, *arguments)
+
+                    why = bytecode_fn(*arguments)
+
+
+                except Exception as e:
+                    print("VMERROR", self.frame, byteName,'(',*arguments,end=' )\n')
+                    sys.print_exception(e)
+
+                    # deal with exceptions encountered while executing the op.
+                    self.last_exception = sys.exc_info()[:2] + (None,)
+                    log.exception("Caught exception during execution")
+                    why = "exception"
 
 
                 if why == "exception":
@@ -306,7 +476,19 @@ class VirtualMachine(object):
 
             return self.return_value
 
-    top_frame = run_frame
+        run_sub_frame = run_frame
+
+        def run_code(self, code, f_globals=None, f_locals=None):
+            global sync
+            frame = self.make_frame(code, f_globals=f_globals, f_locals=f_locals)
+            val = self.run_frame(frame)
+            # Check some invariants
+            if self.frames:  # pragma: no cover
+                raise VirtualMachineError("Frames left over!")
+            if self.frame and self.frame.stack:  # pragma: no cover
+                raise VirtualMachineError("Data left on stack! %r" % self.frame.stack)
+
+            return val
 
 
     def __init__(self):
@@ -325,47 +507,9 @@ class VirtualMachine(object):
         if self.spinlock > 0:
             self.spinlock -= 1
 
-    def dispatch(self, byteName, arguments):
-        """ Dispatch by bytename to the corresponding methods.
-        Exceptions are caught and set on the virtual machine."""
-        why = None
-        try:
-            if byteName.startswith("UNARY_"):
-                self.unaryOperator(byteName[6:])
-            elif byteName.startswith("BINARY_"):
-                self.binaryOperator(byteName[7:])
-            elif byteName.startswith("INPLACE_"):
-                self.inplaceOperator(byteName[8:])
-            elif "SLICE+" in byteName:
-                self.sliceOperator(byteName)
-            else:
-                # dispatch
-                bytecode_fn = getattr(self, "byte_%s" % byteName, None)
-                if not bytecode_fn:  # pragma: no cover
-                    raise VirtualMachineError("unknown bytecode type: %s" % byteName)
-
-                try:
-                    why = bytecode_fn(*arguments)
-                except Exception as e:
-                    print("VMERROR", byteName,'(',*arguments,end=' )\n')
-                    sys.print_exception(e)
-
-
-                if bytecode_fn is self.byte_IMPORT_NAME:
-                    if self.ASYNC and (arguments[0] == 'aio_suspend'):
-                        print("dispatch-async aio_suspend spin==", why)
-                        why = spin_res(why)
-
-        except:
-            # deal with exceptions encountered while executing the op.
-            self.last_exception = sys.exc_info()[:2] + (None,)
-            log.exception("Caught exception during execution")
-            why = "exception"
-
-        return why
-
 
     def call_function(self, arg, args, kwargs):
+        global MONITOR
         lenKw, lenPos = divmod(arg, 256)
         namedargs = {}
         for i in range(lenKw):
@@ -376,6 +520,9 @@ class VirtualMachine(object):
         posargs.extend(args)
 
         func = self.pop()
+
+        if MONITOR:
+            print('    +call_function', func, posargs, namedargs)
 
         is_as = func if func is build_class else None
 
@@ -393,18 +540,33 @@ class VirtualMachine(object):
                 )
             func = func.im_func
 
+        retval =None
+
         if asyncio.iscoroutine(func):
-            print(" ********* AS_BUG 1 ******** ", func)
-            pending[func] = (posargs, namedargs,)
-            return func #as_call_func(self, func, posargs, namedargs)
+            print(" ********* AS_BUG 1 ******** ", func, posargs, namedargs)
+            return
+
+        if len(VirtualMachine.AS_CALL):
+            print(f"  ********** PENDING Q not empty {VirtualMachine.AS_CALL} ")
+
+        # could be the real thing, or None + a stacked coro
 
         try:
             retval = func(*posargs, **namedargs)
         except TypeError:
             raise
 
-        self.push(retval)
+        if len(VirtualMachine.AS_CALL):
+            VirtualMachine.AS_CALL.append(retval)
+            #print(f'  <<<< expect delay {VirtualMachine.AS_CALL} >>>>', retval)
+            return VirtualMachine.AS_DELAYED
 
+        try:
+            self.push(retval)
+        finally:
+            if MONITOR:
+                print('    -call_function', func.__name__, retval)
+                MONITOR-=1
 
     def top(self):
         """Return the value at the top of the stack, with no changes."""
@@ -1139,32 +1301,6 @@ class VirtualMachine(object):
     def byte_SETUP_EXCEPT(self, dest):
         self.push_block("setup-except", dest)
 
-    def byte_SETUP_FINALLY(self, dest):
-        self.push_block("finally", dest)
-
-    def byte_END_FINALLY(self):
-        v = self.pop()
-        if isinstance(v, str):
-            why = v
-            if why in ("return", "continue"):
-                self.return_value = self.pop()
-            if why == "silenced":  # PY3
-                block = self.pop_block()
-                assert block.type == "except-handler"
-                self.unwind_block(block)
-                why = None
-        elif v is None:
-            why = None
-        elif issubclass(v, BaseException):
-            exctype = v
-            val = self.pop()
-            tb = self.pop()
-            self.last_exception = (exctype, val, tb)
-            why = "reraise"
-        else:  # pragma: no cover
-            raise VirtualMachineError("Confused END_FINALLY")
-        return why
-
     def byte_POP_BLOCK(self):
         self.pop_block()
 
@@ -1223,37 +1359,7 @@ class VirtualMachine(object):
         self.push_block("finally", dest)
         self.push(ctxmgr_obj)
 
-    def byte_WITH_CLEANUP_START(self):
-        u = self.top()
-        v = None
-        w = None
-        if u is None:
-            exit_method = self.pop(1)
-        elif isinstance(u, str):
-            if u in {"return", "continue"}:
-                exit_method = self.pop(2)
-            else:
-                exit_method = self.pop(1)
-        elif issubclass(u, BaseException):
-            w, v, u = self.popn(3)
-            tp, exc, tb = self.popn(3)
-            exit_method = self.pop()
-            self.push(tp, exc, tb)
-            self.push(None)
-            self.push(w, v, u)
-            block = self.pop_block()
-            assert block.type == "except-handler"
-            self.push_block(block.type, block.handler, block.level - 1)
 
-        res = exit_method(u, v, w)
-        self.push(u)
-        self.push(res)
-
-    def byte_WITH_CLEANUP_FINISH(self):
-        res = self.pop()
-        u = self.pop()
-        if type(u) is type and issubclass(u, BaseException) and res:
-            self.push("silenced")
 
     def byte_WITH_CLEANUP(self):
         # The code here does some weird stack manipulation: the exit function
@@ -1364,7 +1470,6 @@ class VirtualMachine(object):
         return "return"
 
 
-
     # Coroutine opcodes
 
     def byte_GET_AWAITABLE(self):
@@ -1426,38 +1531,23 @@ class VirtualMachine(object):
 
     def byte_EXEC_STMT(self):
         exec( *self.popn(3) )
-        #stmt, globs, locs = self.popn(3)
-        #six.exec_(stmt, globs, locs)
-
-
 
     def byte_STORE_LOCALS(self):
         self.frame.f_locals = self.pop()
 
-
     def byte_LOAD_BUILD_CLASS(self):
+        global MONITOR
         # New in py3
-        print("\n\n +async BUG")
+#        if VirtualMachine.ASYNC:
+#            print("  + async-build_class", self.frame)
+        MONITOR+=1
         self.push(build_class)
 
 
 
-    def run_code(self, code, f_globals=None, f_locals=None):
-        global sync
-        frame = self.make_frame(code, f_globals=f_globals, f_locals=f_locals)
-        val = self.top_frame(frame)
-        # Check some invariants
-        if self.frames:  # pragma: no cover
-            raise VirtualMachineError("Frames left over!")
-        if self.frame and self.frame.stack:  # pragma: no cover
-            raise VirtualMachineError("Data left on stack! %r" % self.frame.stack)
-
-        return val
-
-
 async def async_run_code(self, code, f_globals=None, f_locals=None):
     frame = self.make_frame(code, f_globals=f_globals, f_locals=f_locals)
-    val = await self.top_frame(frame)
+    val = await self.run_frame(frame)
     # Check some invariants
     if self.frames:  # pragma: no cover
         raise VirtualMachineError("Frames left over!")
@@ -1468,10 +1558,7 @@ async def async_run_code(self, code, f_globals=None, f_locals=None):
 
 
 if __name__ == '__main__':
-    print('\n\nWelcome to Python3+1')
 
-
-    print("\n"*8)
     main_mod = sys.modules['__main__']
 
     import os
@@ -1484,7 +1571,7 @@ if __name__ == '__main__':
 
     filename = sys.argv[-1]
 
-    source = open(filename,'rU').read()
+    source = open(filename,'r').read()
 
     # We have the source.  `compile` still needs the last line to be clean,
     # so make sure it is, then compile a code object from it.
@@ -1495,37 +1582,43 @@ if __name__ == '__main__':
     # Execute the source file.
     vm = VirtualMachine()
 
+    print("\n"*8)
+    print(f"Welcome to Python{sys.version.split(' ',1)[0]}+1 async={vm.ASYNC}\n\n")
+
+
     if not vm.ASYNC:
         vm.run_code(code, f_globals=main_mod.__dict__)
 
     else:
 
-        async def host_io(vm):
+        async def async_io_host(vm):
             while not aio.loop.is_closed():
                 if vm.spinlock:
                     print('\n ******* HOST IO/SYSCALLS ********\n')
                     vm.unlock()
                 await asyncio.sleep(1)
 
-        async def render(vm):
+        async def async_io_render(vm):
             while not aio.loop.is_closed():
                 if vm.READY:
                     break
-                await aio.sleep(.1)
+                await aio.sleep(.5)
+
+            print('async_io_render : rendering starting')
 
             while not aio.loop.is_closed():
-                await aio.sleep(.016)
+                await asyncio.sleep(.016)
                 try:
                     taskMgr.step()
-                except:
+                except Exception as e:
                     await aio.sleep(1)
-                    print('render not ready')
+                    print('render not ready', e)
 
-        aio.loop.create_task( host_io(vm) )
-        aio.loop.create_task( render(vm) )
+        aio.loop.create_task( async_io_host(vm) )
+        aio.loop.create_task( async_io_render(vm) )
         aio.loop.create_task( async_run_code(vm, code, f_globals=main_mod.__dict__) )
 
-        if 1:
+        if 0:
             sys.path.append('/data/git/aioprompt')
             import aioprompt
             aioprompt.schedule(aioprompt.step, 1)

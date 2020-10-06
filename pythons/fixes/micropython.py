@@ -37,7 +37,7 @@ if __UPY__:
 else:
     # https://github.com/pfalcon/pycopy-lib/blob/master/cpython-micropython/micropython.py
 
-    exec("const = lambda x:x", globals(), globals() )
+
 
     def native(x):
         return x

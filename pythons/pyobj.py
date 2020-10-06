@@ -75,10 +75,11 @@ class Function(object):
             frame.generator = gen
             retval = gen
         else:
-            if self._vm.ASYNC and ( not len(self._vm.ASTACK)):
-                print("  ----------------- !!!!!!!!!!! ------------------ ")
-                raise argh
-            retval = self._vm.run_frame(frame)
+            if self._vm.ASYNC: # and ( not len(self._vm.AS_CALL)):
+                #print("  ----------------- !!!!!!!!!!! ------------------ ")
+                self._vm.AS_CALL.append( self._vm.run_frame(frame) )
+                return None
+            retval = self._vm.run_sub_frame(frame)
         return retval
 
 
@@ -99,14 +100,18 @@ class Method(object):
         if len(argv) and (argv[0] is undefined):
             print("re-routing","Method.__call__ -> async",argv,kw)
             try:
-                self.im_func._vm.ASTACK.append(1)
                 if self.im_self is not None:
-                    self.im_func._vm.ASTACK.append( self.im_func(self.im_self, *argv[1:], **kw) )
+                    self.im_func._vm.AS_CALL.append( self.im_func(self.im_self, *argv[1:], **kw) )
                 else:
-                    self.im_func._vm.ASTACK.append( self.im_func(*argv[1:], **kw ))
+                    self.im_func._vm.AS_CALL.append( self.im_func(*argv[1:], **kw ))
+
+                # we could return an __init__() so send None
+                # call_function will add the missing retval
+                # self.im_func._vm.AS_CALL.append(None)
                 return None
+
             finally:
-                print("routed !", self.im_func._vm.ASTACK )
+                print("routed !", self.im_func._vm.AS_CALL )
 
         if self.im_self is not None:
             return self.im_func(self.im_self, *argv, **kw)
