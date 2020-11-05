@@ -130,8 +130,8 @@ except:
         embed.log
     except:
         pdb("CRITICAL: embed functions not found in __main__")
-        embed.CLI = print
-        embed.STI = print
+        embed.enable_irq = print
+        embed.disable_irq = print
         embed.log = print
 
 
@@ -189,6 +189,7 @@ if __UPY__:
         fn = kw.get("file")
         ln = kw.get("line")
 
+        print(end='\r')
         print("_" * 45)
         print("Traceback, most recent call : %s:%s" % (fn, ln))
         while len(format_list):
@@ -276,10 +277,10 @@ if __UPY__:
 class _:
 
     def __enter__(self):
-        embed.CLI()
+        embed.disable_irq()
 
     def __exit__(self, type, value, traceback):
-        embed.STI()
+        embed.enable_irq()
 
 aio.block = _()
 
@@ -316,8 +317,14 @@ class _(list):
         self.append(  self.__class__.current )
         self.__class__.current = None
         if self[-1].coro is not None:
-            print("__aenter__ awaiting", self[-1].coro)
-            return await self[-1].coro
+            pdb("__aenter__ awaiting", self[-1].coro)
+            try:
+                return await self[-1].coro
+            except KeyboardInterrupt:
+                aio.paused = None
+                aio.loop.call_soon( aio.loop.stop )
+                pdb("326: aio exit on KeyboardInterrupt")
+                return await aio.sleep(0)
         else:
             print('__aenter__ no coro')
             self.__class__.current = None

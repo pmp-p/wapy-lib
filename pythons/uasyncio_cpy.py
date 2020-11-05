@@ -125,8 +125,8 @@ def run_once(*argv,**kw):
 _event_loop.run_once = run_once
 
 
-def sleep_ms(t):
-    return sleep(float(t)/1_000)
+async def sleep_ms(t):
+    await sleep(float(t)/1_000)
 
 del run_once
 

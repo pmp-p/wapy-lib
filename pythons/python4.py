@@ -8,39 +8,313 @@
 # x-python by R. Bernstein https://github.com/rocky/x-python
 # python3+1 bidouillé par pmp-p https://github.com/pydk
 
+# AUTHORS
+# Ned Batchelder
+# Allison Kaptur
+# Laura Lindzey
+# Rahul Gopinath
+# Björn Mathis
+# Darius Bacon
+# Paul Peny
+# etc...
+#
+#
+#
+#
+
+
+
 
 import sys
 import dis
 import linecache  # for print_frames
 import operator
 import types
+import collections
+import inspect
+import types
+
+
+import builtins
+
+
+class cpy:
+    import inspect
+    getcallargs = inspect.getcallargs
+
+
 
 sys.path.append('.')
-
-if 1:
-    import pygame
-    import pickle
-    import math
-    import random
-    import os
-
-    pygame.init()
-    pygame.font.init()
-    pygame.display.set_mode((1,1))
 
 
 import asyncio
 
-#import six
-import inspect # for .isclass
+import six
+
 
 # add stdlib / wapy-lib / pycopy-lib / micropython-lib / etc ... to path
 sys.path.append( __file__.rsplit('/',2)[0] )
 
-from pythons.pyobj import Frame, Block, Method, Function, Generator, Cell
+#from pythons.pyobj import Frame, Block, Method, Function, Generator, Cell
 
 
 byteint = lambda b: b
+
+
+
+
+def make_cell(value):
+    # Thanks to Alex Gaynor for help with this bit of twistiness.
+    # Construct an actual cell object by creating a closure right here,
+    # and grabbing the cell object out of the function we create.
+    fn = (lambda x: lambda: x)(value)
+    return fn.__closure__[0]
+
+
+class Function(object):
+    __slots__ = [
+        'func_code', 'func_name', 'func_defaults', 'func_globals',
+        'func_locals', 'func_dict', 'func_closure',
+        '__name__', '__dict__', '__doc__',
+        '_vm', '_func',
+    ]
+
+    def __init__(self, name, code, globs, defaults, kwdefaults, closure, vm):
+        self._vm = vm
+        self.func_code = code
+        self.func_name = self.__name__ = name or code.co_name
+        self.func_defaults = defaults
+        self.func_globals = globs
+        self.func_locals = self._vm.frame.f_locals
+        self.__dict__ = {}
+        self.func_closure = closure
+        self.__doc__ = code.co_consts[0] if code.co_consts else None
+
+        # Sometimes, we need a real Python function.  This is for that.
+        kw = {
+            'argdefs': self.func_defaults,
+        }
+        if closure:
+            kw['closure'] = tuple(make_cell(0) for _ in closure)
+        self._func = types.FunctionType(code, globs, **kw)
+
+    def __repr__(self):         # pragma: no cover
+        return '<Function %s at 0x%08x>' % (
+            self.func_name, id(self)
+        )
+
+    def __get__(self, instance, owner):
+        if instance is not None:
+            return Method(instance, owner, self)
+        return self
+
+    def __call__(self, *argv, **kw):
+        global MONITOR
+        if MONITOR:
+            print("103:",self.__name__,argv,kw)
+
+        callargs = cpy.getcallargs(self._func, *argv, **kw)
+
+        frame = self._vm.make_frame(
+            self.func_code, callargs, self.func_globals, {}, self.func_closure
+        )
+        CO_GENERATOR = 32           # flag for "this code uses yield"
+        if self.func_code.co_flags & CO_GENERATOR:
+            gen = Generator(frame, self._vm)
+            frame.generator = gen
+            retval = gen
+        else:
+            retval = self._vm.run_frame(frame)
+
+            if MONITOR:
+                print(f"  ------ !!!!! new frame {self._func} !!! -------- ")
+
+            if self._vm.AS:
+                self._vm.AS_CALL.append( retval )
+                return None
+
+        return retval
+
+
+class Native(object):
+    def __init__(self, instance, func ):
+        self._self = instance
+        self._func = func
+
+    def __call__(self,*argv,**kw):
+        return self._func(self._self,*argv,**kw)
+
+
+class Method(object):
+    def __init__(self, obj, _class, func):
+        self.im_self = obj
+        self.im_class = _class
+        self.im_func = func
+
+    def __repr__(self):         # pragma: no cover
+        vm = self.im_func._vm
+
+        if vm.exporter:
+
+            sid = str(id(self))
+            vm.AS_RES[sid] = Native(self.im_self, self.im_func._func)
+            return sid
+
+        name = "%s.%s" % (self.im_class.__name__, self.im_func.func_name)
+        if self.im_self is not None:
+            #return '<Bound AS_Method %s of %s>' % (name, self.im_self)
+            return '<Bound AS_Method(%s) of %s>' % (self.im_func._func, self.im_self)
+        else:
+            return '<Unbound AS_Method %s>' % (name,)
+
+    def __call__(self, *argv, **kw):
+        global MONITOR
+
+        if self.im_func.__name__.find('update')>=0:
+            MONITOR += 1
+
+        if self.im_self is not None:
+            retval= self.im_func(self.im_self, *argv, **kw)
+        else:
+            retval= self.im_func(*argv, **kw)
+
+        if MONITOR:
+            print("153:__call__", self.im_func.__name__, retval )
+        return retval
+
+
+
+
+class Cell(object):
+    """A fake cell for closures.
+
+    Closures keep names in scope by storing them not in a frame, but in a
+    separate object called a cell.  Frames share references to cells, and
+    the LOAD_DEREF and STORE_DEREF opcodes get and set the value from cells.
+
+    This class acts as a cell, though it has to jump through two hoops to make
+    the simulation complete:
+
+        1. In order to create actual FunctionType functions, we have to have
+           actual cell objects, which are difficult to make. See the twisty
+           double-lambda in __init__.
+
+        2. Actual cell objects can't be modified, so to implement STORE_DEREF,
+           we store a one-element list in our cell, and then use [0] as the
+           actual value.
+
+    """
+    def __init__(self, value):
+        self.contents = value
+
+    def get(self):
+        return self.contents
+
+    def set(self, value):
+        self.contents = value
+
+
+Block = collections.namedtuple("Block", "type, handler, level")
+
+
+class Frame(object):
+    def __init__(self, f_code, f_globals, f_locals, f_closure, f_back):
+        self.f_code = f_code
+        self.opcodes = list(dis.get_instructions(self.f_code))
+        self.f_globals = f_globals
+        self.f_locals = f_locals
+        self.f_back = f_back
+        self.stack = []
+        if f_back and f_back.f_globals is f_globals:
+            # If we share the globals, we share the builtins.
+            self.f_builtins = f_back.f_builtins
+        else:
+            try:
+                self.f_builtins = f_globals['__builtins__']
+                if hasattr(self.f_builtins, '__dict__'):
+                    self.f_builtins = self.f_builtins.__dict__
+            except KeyError:
+                # No builtins! Make up a minimal one with None.
+                self.f_builtins = {'None': None}
+
+        self.f_lineno = f_code.co_firstlineno
+        self.f_lasti = 0
+
+        self.cells = {} if f_code.co_cellvars or f_code.co_freevars else None
+        for var in f_code.co_cellvars:
+            # Make a cell for the variable in our locals, or None.
+            self.cells[var] = Cell(self.f_locals.get(var))
+        if f_code.co_freevars:
+            assert len(f_code.co_freevars) == len(f_closure)
+            self.cells.update(zip(f_code.co_freevars, f_closure))
+
+        self.block_stack = []
+        self.generator = None
+
+    def __repr__(self):         # pragma: no cover
+        return '<Frame at 0x%08x: %r @ %d>' % (
+            id(self), self.f_code.co_filename, self.f_lineno
+        )
+
+    def line_number(self):
+        """Get the current line number the frame is executing."""
+        # We don't keep f_lineno up to date, so calculate it based on the
+        # instruction address and the line number table.
+        lnotab = self.f_code.co_lnotab
+        byte_increments = six.iterbytes(lnotab[0::2])
+        line_increments = six.iterbytes(lnotab[1::2])
+
+        byte_num = 0
+        line_num = self.f_code.co_firstlineno
+
+        for byte_incr, line_incr in zip(byte_increments, line_increments):
+            byte_num += byte_incr
+            if byte_num > self.f_lasti:
+                break
+            line_num += line_incr
+
+        return line_num
+
+
+class Generator(object):
+    def __init__(self, g_frame, vm):
+        self.gi_frame = g_frame
+        self.vm = vm
+        self.started = False
+        self.finished = False
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.send(None)
+
+    def send(self, value=None):
+        if not self.started and value is not None:
+            raise TypeError("Can't send non-None value to a just-started generator")
+        self.gi_frame.stack.append(value)
+        self.started = True
+        val = self.vm.resume_frame(self.gi_frame)
+        if self.finished:
+            raise StopIteration(val)
+        return val
+
+    __next__ = next
+
+
+
+
+
+
+
+
+
+
+
+#// ================================== VM =================================================
+
+
+
 
 
 MONITOR = 0
@@ -88,10 +362,6 @@ del key, value
 
 pending = {}
 
-
-class VirtualMachineError(Exception):
-    """For raising errors in the operation of the VM."""
-    pass
 
 
 def sync_metacell(meta, cell):
@@ -180,6 +450,22 @@ async def spin_res(vm, result):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class vm_TRY_FINALLY(object):
 
     # https://bugs.python.org/issue33387
@@ -249,55 +535,325 @@ class vm_TRY_FINALLY(object):
             raise VirtualMachineError("Confused END_FINALLY")
         return why
 
-class VirtualMachine(vm_TRY_FINALLY):
 
-    # https://rokups.github.io/#!pages/python3-asyncio-sync-async.md
-
-    # asterpreter or not
-    AS = 0
-
-    exporter = 0
-
-    AS_DELAYED = object()
-
-    READY = False
-
-    AS_BUILD = []
-
-    AS_CALL = []
-
-    AS_RES = {}
+class vm_STACK:
 
 
+    ## Stack manipulation
 
-    if not 'sync' in sys.argv:
+    def byte_LOAD_CONST(self, const):
+        self.push(const)
+
+    def byte_POP_TOP(self):
+        self.pop()
+
+    def byte_DUP_TOP(self):
+        self.push(self.top())
+
+    def byte_DUP_TOPX(self, count):
+        items = self.popn(count)
+        self.push(*items)
+        self.push(*items)
+
+    def byte_DUP_TOP_TWO(self):
+        # Py3 only
+        a, b = self.popn(2)
+        self.push(a, b, a, b)
+
+    def byte_ROT_TWO(self):
+        a, b = self.popn(2)
+        self.push(b, a)
+
+    def byte_ROT_THREE(self):
+        a, b, c = self.popn(3)
+        self.push(c, a, b)
+
+    def byte_ROT_FOUR(self):
+        a, b, c, d = self.popn(4)
+        self.push(d, a, b, c)
+
+    ## Names
+
+    def byte_LOAD_NAME(self, name):
+        frame = self.frame
+        if name in frame.f_locals:
+            val = frame.f_locals[name]
+        elif name in frame.f_globals:
+            val = frame.f_globals[name]
+        elif name in frame.f_builtins:
+            val = frame.f_builtins[name]
+        else:
+            raise NameError("name '%s' is not defined" % name)
+        self.push(val)
+
+    def byte_STORE_NAME(self, name):
+        self.frame.f_locals[name] = self.pop()
+
+    def byte_DELETE_NAME(self, name):
+        del self.frame.f_locals[name]
+
+    def byte_LOAD_FAST(self, name):
+        if name in self.frame.f_locals:
+            val = self.frame.f_locals[name]
+        else:
+            raise UnboundLocalError("local variable '%s' referenced before assignment" % name)
+        self.push(val)
+
+    def byte_STORE_FAST(self, name):
+        self.frame.f_locals[name] = self.pop()
+
+    def byte_DELETE_FAST(self, name):
+        del self.frame.f_locals[name]
+
+    def byte_LOAD_GLOBAL(self, name):
+        f = self.frame
+        if name in f.f_globals:
+            val = f.f_globals[name]
+        elif name in f.f_builtins:
+            val = f.f_builtins[name]
+        else:
+            raise NameError("name '%s' is not defined" % name)
+        self.push(val)
+
+    def byte_STORE_GLOBAL(self, name):
+        f = self.frame
+        f.f_globals[name] = self.pop()
+
+    def byte_LOAD_DEREF(self, name):
+        self.push(self.frame.cells[name].get())
+
+    def byte_STORE_DEREF(self, name):
+        self.frame.cells[name].set(self.pop())
+
+    def byte_LOAD_LOCALS(self):
+        self.push(self.frame.f_locals)
+
+    def byte_LOAD_METHOD(self, name):
+        func = getattr(self.pop(), name)
+        self.push(func)
+
+    def byte_BUILD_STRING(self, count):
+        """
+        The version of BUILD_MAP specialized for constant keys. count
+        values are consumed from the stack. The top element on the
+        stack contains a tuple of keys.
+        """
+        self.push("".join( self.popn(count) ))
+
+
+    def byte_FORMAT_VALUE(self, flags):
+        """Used for implementing formatted literal strings (f-strings). Pops
+        an optional fmt_spec from the stack, then a required value. flags is
+        interpreted as follows:
+
+        * (flags & 0x03) == 0x00: value is formatted as-is.
+        * (flags & 0x03) == 0x01: call str() on value before formatting it.
+        * (flags & 0x03) == 0x02: call repr() on value before formatting it.
+        * (flags & 0x03) == 0x03: call ascii() on value before formatting it.
+        * (flags & 0x04) == 0x04: pop fmt_spec from the stack and use it, else use an empty fmt_spec.
+
+        Formatting is performed using PyObject_Format(). The result is
+        pushed on the stack.
+        """
+        if flags & 0x04 == 0x04:
+            format_spec = self.pop()
+        else:
+            format_spec = ''
+
+        value = self.pop()
+        attr_flags = flags & 0x03
+        if attr_flags:
+            value = FSTRING_CONVERSION_MAP.get(attr_flags, identity)(value)
+
+        result = format(value, format_spec)
+        self.push(result)
+
+
+
+class vm_PRINT:
+    ## Printing
+
+    if 0:  # Only used in the interactive interpreter, not in modules.
+
+        def byte_PRINT_EXPR(self):
+            print(self.pop())
+
+    def byte_PRINT_ITEM(self):
+        item = self.pop()
+        self.print_item(item)
+
+    def byte_PRINT_ITEM_TO(self):
+        to = self.pop()
+        item = self.pop()
+        self.print_item(item, to)
+
+    def byte_PRINT_NEWLINE(self):
+        self.print_newline()
+
+    def byte_PRINT_NEWLINE_TO(self):
+        to = self.pop()
+        self.print_newline(to)
+
+    def print_item(self, item, to=None):
+        if to is None:
+            to = sys.stdout
+        if to.softspace:
+            print(" ", end="", file=to)
+            to.softspace = 0
+        print(item, end="", file=to)
+        if isinstance(item, str):
+            if (not item) or (not item[-1].isspace()) or (item[-1] == " "):
+                to.softspace = 1
+        else:
+            to.softspace = 1
+
+    def print_newline(self, to=None):
+        if to is None:
+            to = sys.stdout
+        print("", file=to)
+        to.softspace = 0
+
+
+
+class vm_JUMPS:
+
+    def byte_JUMP_FORWARD(self, jump):
+        self.jump(jump)
+
+    def byte_JUMP_ABSOLUTE(self, jump):
+        self.jump(jump)
+
+
+    def byte_POP_JUMP_IF_TRUE(self, jump):
+        val = self.pop()
+        if val:
+            self.jump(jump)
+
+    def byte_POP_JUMP_IF_FALSE(self, jump):
+        val = self.pop()
+        if not val:
+            self.jump(jump)
+
+    def byte_JUMP_IF_TRUE_OR_POP(self, jump):
+        val = self.top()
+        if val:
+            self.jump(jump)
+        else:
+            self.pop()
+
+    def byte_JUMP_IF_FALSE_OR_POP(self, jump):
+        val = self.top()
+        if not val:
+            self.jump(jump)
+        else:
+            self.pop()
+
+
+
+class vm_BLOCKS:
+
+    def byte_SETUP_LOOP(self, dest):
+        self.push_block("loop", dest)
+
+    def byte_GET_ITER(self):
+        self.push(iter(self.pop()))
+
+    def byte_GET_YIELD_FROM_ITER(self):
+        tos = self.top()
+        if isinstance(tos, types.GeneratorType) or isinstance(tos, types.CoroutineType):
+            return
+        tos = self.pop()
+        self.push(iter(tos))
+
+    def byte_FOR_ITER(self, jump):
+        iterobj = self.top()
+        try:
+            v = next(iterobj)
+            self.push(v)
+        except StopIteration:
+            self.pop()
+            self.jump(jump)
+
+    def byte_BREAK_LOOP(self):
+        return "break"
+
+    def byte_CONTINUE_LOOP(self, dest):
+        # This is a trick with the return value.
+        # While unrolling blocks, continue and return both have to preserve
+        # state as the finally blocks are executed.  For continue, it's
+        # where to jump to, for return, it's the value to return.  It gets
+        # pushed on the stack for both, so continue puts the jump destination
+        # into return_value.
+        self.return_value = dest
+        return "continue"
+
+    def byte_SETUP_EXCEPT(self, dest):
+        self.push_block("setup-except", dest)
+
+    def byte_POP_BLOCK(self):
+        self.pop_block()
+
+    def byte_RAISE_VARARGS(self, argc):
+        cause = exc = None
+        if argc == 2:
+            cause = self.pop()
+            exc = self.pop()
+        elif argc == 1:
+            exc = self.pop()
+        return self.do_raise(exc, cause)
+
+    def byte_POP_EXCEPT(self):
+        block = self.pop_block()
+        if block.type != "except-handler":
+            raise Exception("popped block is not an except handler")
+        self.unwind_block(block)
+
+    def byte_SETUP_WITH(self, dest):
+        ctxmgr = self.pop()
+        self.push(ctxmgr.__exit__)
+        ctxmgr_obj = ctxmgr.__enter__()
+        self.push_block("finally", dest)
+        self.push(ctxmgr_obj)
+
+
+
+    def byte_WITH_CLEANUP(self):
+        # The code here does some weird stack manipulation: the exit function
+        # is buried in the stack, and where depends on what's on top of it.
+        # Pull out the exit function, and leave the rest in place.
+        v = w = None
+        u = self.top()
+        if u is None:
+            exit_func = self.pop(1)
+        elif isinstance(u, str):
+            if u in ("return", "continue"):
+                exit_func = self.pop(2)
+            else:
+                exit_func = self.pop(1)
+            u = None
+        elif issubclass(u, BaseException):
+            w, v, u = self.popn(3)
+            tp, exc, tb = self.popn(3)
+            exit_func = self.pop()
+            self.push(tp, exc, tb)
+            self.push(None)
+            self.push(w, v, u)
+            block = self.pop_block()
+            assert block.type == "except-handler"
+            self.push_block(block.type, block.handler, block.level - 1)
+        else:  # pragma: no cover
+            raise VirtualMachineError("Confused WITH_CLEANUP")
+        exit_ret = exit_func(u, v, w)
+        err = (u is not None) and bool(exit_ret)
+        if err:
+            # An error occurred, and was suppressed
+            self.push("silenced")
+
+
+if not 'sync' in sys.argv:
+    class vm_MODE:
 
         ASYNC = True
-
-#        def __enter__(self,*a,**k):
-#            self.export += 1
-#
-#        def __exit__(self,*a,**k):
-#            self.export -= 1
-
-        def export(self, fn, *argv, **kw):
-            VirtualMachine.exporter += 1
-            try:
-                sid = repr(fn)
-                native = VirtualMachine.AS_RES.pop(sid)
-                if asyncio.iscoroutinefunction(native._func):
-                    print("289: exporting coro")
-                    if len(argv):
-                        argv = list(argv)
-                        argv.insert(0, native._self)
-                        return native._func(*argv, **kw)
-                    else:
-                        return native._func(native._self, **kw)
-                return native
-
-            finally:
-                VirtualMachine.exporter -= 1
-
 
         async def run_frame_meta(self, frame, meta):
             await self.run_frame(frame)
@@ -307,10 +863,6 @@ class VirtualMachine(vm_TRY_FINALLY):
                 return self.return_value
             finally:
                 print('    < async build_class/run_frame_meta =', self.return_value, async_result)
-
-
-        #async def run_sub_frame(self, frame):
-        #    return await self.run_frame(frame)
 
         async def run_frame(self, frame):
             global MONITOR
@@ -343,16 +895,17 @@ class VirtualMachine(vm_TRY_FINALLY):
 
                 bytecode_fn = getattr(self, "byte_%s" % byteName, None)
 
-                if not bytecode_fn:  # pragma: no cover
+                if bytecode_fn is None:
                     raise VirtualMachineError("unknown bytecode type: %s" % byteName)
 
                 try:
                     # dispatch
+                    #print("903:",byteName, arguments, opoffset)
 
-                    if bytecode_fn is self.byte_IMPORT_NAME:
+                    if byteName=="IMPORT_NAME":
+                        #print("906: dispatch-async aio_suspend spin==", why)
                         if self.ASYNC and (arguments[0] == 'aio_suspend'):
-                            print("dispatch-async aio_suspend spin==", why)
-                            why = spin_res(bytecode_fn(*arguments))
+                            why = await spin_res(self, bytecode_fn(*arguments))
 
                     elif byteName.startswith('CALL_'):
                         if MONITOR:
@@ -420,8 +973,10 @@ class VirtualMachine(vm_TRY_FINALLY):
 
             return self.return_value
 
+if 'sync' in sys.argv:
+    error()
+    class vm_MODE:
 
-    else:
         ASYNC = False
 
         def run_frame(self, frame):
@@ -524,6 +1079,29 @@ class VirtualMachine(vm_TRY_FINALLY):
             return val
 
 
+class vm_CORE:
+
+    # https://rokups.github.io/#!pages/python3-asyncio-sync-async.md
+
+    # asterpreter or not
+    AS = 0
+
+
+
+    AS_DELAYED = object()
+
+
+
+    AS_BUILD = []
+
+    AS_CALL = []
+
+    AS_RES = {}
+
+
+
+
+
     def __init__(self):
         # The call stack of frames.
         self.frames = []
@@ -533,12 +1111,7 @@ class VirtualMachine(vm_TRY_FINALLY):
         self.last_exception = None
         self.spinlock = 0
 
-    def lock(self):
-        self.spinlock += 1
 
-    def unlock(self):
-        if self.spinlock > 0:
-            self.spinlock -= 1
 
 
     def call_function(self, arg, args, kwargs):
@@ -735,15 +1308,16 @@ class VirtualMachine(vm_TRY_FINALLY):
             return self.parse_byte_and_args()
 
         if byteCode >= dis.HAVE_ARGUMENT:
-            if sys.version_info >= (3, 6):
-                intArg = currentOp.arg
-            else:
-                arg = f.f_code.co_code[f.f_lasti : f.f_lasti + 2]
-                f.f_lasti += 2
-                intArg = byteint(arg[0]) + (byteint(arg[1]) << 8)
+            # if sys.version_info >= (3, 6):
+            intArg = currentOp.arg
+            # else:
+            #    arg = f.f_code.co_code[f.f_lasti : f.f_lasti + 2]
+            #    f.f_lasti += 2
+            #    intArg = byteint(arg[0]) + (byteint(arg[1]) << 8)
 
             if byteCode in dis.hasconst:
                 arg = f.f_code.co_consts[intArg]
+
             elif byteCode in dis.hasfree:
                 if intArg < len(f.f_code.co_cellvars):
                     arg = f.f_code.co_cellvars[intArg]
@@ -752,37 +1326,28 @@ class VirtualMachine(vm_TRY_FINALLY):
                     arg = f.f_code.co_freevars[var_idx]
             elif byteCode in dis.hasname:
                 arg = f.f_code.co_names[intArg]
+
             elif byteCode in dis.hasjrel:
                 if sys.version_info >= (3, 6):
                     arg = f.f_lasti + intArg // 2
                 else:
                     arg = f.f_lasti + intArg
+
             elif byteCode in dis.hasjabs:
                 if sys.version_info >= (3, 6):
                     arg = intArg // 2
                 else:
                     arg = intArg
+
             elif byteCode in dis.haslocal:
                 arg = f.f_code.co_varnames[intArg]
+
             else:
                 arg = intArg
 
             arguments = [arg]
 
         return byteName, arguments, opoffset
-
-    def log(self, byteName, arguments, opoffset):
-        """ Log arguments, block stack, and data stack for each opcode."""
-        op = "%d: %s" % (opoffset, byteName)
-        if arguments:
-            op += " %r" % (arguments[0],)
-        indent = "    " * (len(self.frames) - 1)
-        stack_rep = repper(self.frame.stack)
-        block_stack_rep = repper(self.frame.block_stack)
-
-        log.info("  %sdata: %s" % (indent, stack_rep))
-        log.info("  %sblks: %s" % (indent, block_stack_rep))
-        log.info("%s%s" % (indent, op))
 
 
 
@@ -826,137 +1391,6 @@ class VirtualMachine(vm_TRY_FINALLY):
             return why
 
         return why
-
-
-
-    ## Stack manipulation
-
-    def byte_LOAD_CONST(self, const):
-        self.push(const)
-
-    def byte_POP_TOP(self):
-        self.pop()
-
-    def byte_DUP_TOP(self):
-        self.push(self.top())
-
-    def byte_DUP_TOPX(self, count):
-        items = self.popn(count)
-        self.push(*items)
-        self.push(*items)
-
-    def byte_DUP_TOP_TWO(self):
-        # Py3 only
-        a, b = self.popn(2)
-        self.push(a, b, a, b)
-
-    def byte_ROT_TWO(self):
-        a, b = self.popn(2)
-        self.push(b, a)
-
-    def byte_ROT_THREE(self):
-        a, b, c = self.popn(3)
-        self.push(c, a, b)
-
-    def byte_ROT_FOUR(self):
-        a, b, c, d = self.popn(4)
-        self.push(d, a, b, c)
-
-    ## Names
-
-    def byte_LOAD_NAME(self, name):
-        frame = self.frame
-        if name in frame.f_locals:
-            val = frame.f_locals[name]
-        elif name in frame.f_globals:
-            val = frame.f_globals[name]
-        elif name in frame.f_builtins:
-            val = frame.f_builtins[name]
-        else:
-            raise NameError("name '%s' is not defined" % name)
-        self.push(val)
-
-    def byte_STORE_NAME(self, name):
-        self.frame.f_locals[name] = self.pop()
-
-    def byte_DELETE_NAME(self, name):
-        del self.frame.f_locals[name]
-
-    def byte_LOAD_FAST(self, name):
-        if name in self.frame.f_locals:
-            val = self.frame.f_locals[name]
-        else:
-            raise UnboundLocalError("local variable '%s' referenced before assignment" % name)
-        self.push(val)
-
-    def byte_STORE_FAST(self, name):
-        self.frame.f_locals[name] = self.pop()
-
-    def byte_DELETE_FAST(self, name):
-        del self.frame.f_locals[name]
-
-    def byte_LOAD_GLOBAL(self, name):
-        f = self.frame
-        if name in f.f_globals:
-            val = f.f_globals[name]
-        elif name in f.f_builtins:
-            val = f.f_builtins[name]
-        else:
-            raise NameError("name '%s' is not defined" % name)
-        self.push(val)
-
-    def byte_STORE_GLOBAL(self, name):
-        f = self.frame
-        f.f_globals[name] = self.pop()
-
-    def byte_LOAD_DEREF(self, name):
-        self.push(self.frame.cells[name].get())
-
-    def byte_STORE_DEREF(self, name):
-        self.frame.cells[name].set(self.pop())
-
-    def byte_LOAD_LOCALS(self):
-        self.push(self.frame.f_locals)
-
-    def byte_LOAD_METHOD(self, name):
-        func = getattr(self.pop(), name)
-        self.push(func)
-
-    def byte_BUILD_STRING(self, count):
-        """
-        The version of BUILD_MAP specialized for constant keys. count
-        values are consumed from the stack. The top element on the
-        stack contains a tuple of keys.
-        """
-        self.push("".join( self.popn(count) ))
-
-
-    def byte_FORMAT_VALUE(self, flags):
-        """Used for implementing formatted literal strings (f-strings). Pops
-        an optional fmt_spec from the stack, then a required value. flags is
-        interpreted as follows:
-
-        * (flags & 0x03) == 0x00: value is formatted as-is.
-        * (flags & 0x03) == 0x01: call str() on value before formatting it.
-        * (flags & 0x03) == 0x02: call repr() on value before formatting it.
-        * (flags & 0x03) == 0x03: call ascii() on value before formatting it.
-        * (flags & 0x04) == 0x04: pop fmt_spec from the stack and use it, else use an empty fmt_spec.
-
-        Formatting is performed using PyObject_Format(). The result is
-        pushed on the stack.
-        """
-        if flags & 0x04 == 0x04:
-            format_spec = self.pop()
-        else:
-            format_spec = ''
-
-        value = self.pop()
-        attr_flags = flags & 0x03
-        if attr_flags:
-            value = FSTRING_CONVERSION_MAP.get(attr_flags, identity)(value)
-
-        result = format(value, format_spec)
-        self.push(result)
 
 
     ## Operators
@@ -1219,132 +1653,8 @@ class VirtualMachine(vm_TRY_FINALLY):
         the_map = self.peek(count)
         the_map[key] = val
 
-    ## Printing
-
-    if 0:  # Only used in the interactive interpreter, not in modules.
-
-        def byte_PRINT_EXPR(self):
-            print(self.pop())
-
-    def byte_PRINT_ITEM(self):
-        item = self.pop()
-        self.print_item(item)
-
-    def byte_PRINT_ITEM_TO(self):
-        to = self.pop()
-        item = self.pop()
-        self.print_item(item, to)
-
-    def byte_PRINT_NEWLINE(self):
-        self.print_newline()
-
-    def byte_PRINT_NEWLINE_TO(self):
-        to = self.pop()
-        self.print_newline(to)
-
-    def print_item(self, item, to=None):
-        if to is None:
-            to = sys.stdout
-        if to.softspace:
-            print(" ", end="", file=to)
-            to.softspace = 0
-        print(item, end="", file=to)
-        if isinstance(item, str):
-            if (not item) or (not item[-1].isspace()) or (item[-1] == " "):
-                to.softspace = 1
-        else:
-            to.softspace = 1
-
-    def print_newline(self, to=None):
-        if to is None:
-            to = sys.stdout
-        print("", file=to)
-        to.softspace = 0
-
-    ## Jumps
-
-    def byte_JUMP_FORWARD(self, jump):
-        self.jump(jump)
-
-    def byte_JUMP_ABSOLUTE(self, jump):
-        self.jump(jump)
 
 
-    def byte_POP_JUMP_IF_TRUE(self, jump):
-        val = self.pop()
-        if val:
-            self.jump(jump)
-
-    def byte_POP_JUMP_IF_FALSE(self, jump):
-        val = self.pop()
-        if not val:
-            self.jump(jump)
-
-    def byte_JUMP_IF_TRUE_OR_POP(self, jump):
-        val = self.top()
-        if val:
-            self.jump(jump)
-        else:
-            self.pop()
-
-    def byte_JUMP_IF_FALSE_OR_POP(self, jump):
-        val = self.top()
-        if not val:
-            self.jump(jump)
-        else:
-            self.pop()
-
-    ## Blocks
-
-    def byte_SETUP_LOOP(self, dest):
-        self.push_block("loop", dest)
-
-    def byte_GET_ITER(self):
-        self.push(iter(self.pop()))
-
-    def byte_GET_YIELD_FROM_ITER(self):
-        tos = self.top()
-        if isinstance(tos, types.GeneratorType) or isinstance(tos, types.CoroutineType):
-            return
-        tos = self.pop()
-        self.push(iter(tos))
-
-    def byte_FOR_ITER(self, jump):
-        iterobj = self.top()
-        try:
-            v = next(iterobj)
-            self.push(v)
-        except StopIteration:
-            self.pop()
-            self.jump(jump)
-
-    def byte_BREAK_LOOP(self):
-        return "break"
-
-    def byte_CONTINUE_LOOP(self, dest):
-        # This is a trick with the return value.
-        # While unrolling blocks, continue and return both have to preserve
-        # state as the finally blocks are executed.  For continue, it's
-        # where to jump to, for return, it's the value to return.  It gets
-        # pushed on the stack for both, so continue puts the jump destination
-        # into return_value.
-        self.return_value = dest
-        return "continue"
-
-    def byte_SETUP_EXCEPT(self, dest):
-        self.push_block("setup-except", dest)
-
-    def byte_POP_BLOCK(self):
-        self.pop_block()
-
-    def byte_RAISE_VARARGS(self, argc):
-        cause = exc = None
-        if argc == 2:
-            cause = self.pop()
-            exc = self.pop()
-        elif argc == 1:
-            exc = self.pop()
-        return self.do_raise(exc, cause)
 
     def do_raise(self, exc, cause):
         if exc is None:  # reraise
@@ -1379,52 +1689,7 @@ class VirtualMachine(vm_TRY_FINALLY):
         self.last_exception = exc_type, val, val.__traceback__
         return "exception"
 
-    def byte_POP_EXCEPT(self):
-        block = self.pop_block()
-        if block.type != "except-handler":
-            raise Exception("popped block is not an except handler")
-        self.unwind_block(block)
 
-    def byte_SETUP_WITH(self, dest):
-        ctxmgr = self.pop()
-        self.push(ctxmgr.__exit__)
-        ctxmgr_obj = ctxmgr.__enter__()
-        self.push_block("finally", dest)
-        self.push(ctxmgr_obj)
-
-
-
-    def byte_WITH_CLEANUP(self):
-        # The code here does some weird stack manipulation: the exit function
-        # is buried in the stack, and where depends on what's on top of it.
-        # Pull out the exit function, and leave the rest in place.
-        v = w = None
-        u = self.top()
-        if u is None:
-            exit_func = self.pop(1)
-        elif isinstance(u, str):
-            if u in ("return", "continue"):
-                exit_func = self.pop(2)
-            else:
-                exit_func = self.pop(1)
-            u = None
-        elif issubclass(u, BaseException):
-            w, v, u = self.popn(3)
-            tp, exc, tb = self.popn(3)
-            exit_func = self.pop()
-            self.push(tp, exc, tb)
-            self.push(None)
-            self.push(w, v, u)
-            block = self.pop_block()
-            assert block.type == "except-handler"
-            self.push_block(block.type, block.handler, block.level - 1)
-        else:  # pragma: no cover
-            raise VirtualMachineError("Confused WITH_CLEANUP")
-        exit_ret = exit_func(u, v, w)
-        err = (u is not None) and bool(exit_ret)
-        if err:
-            # An error occurred, and was suppressed
-            self.push("silenced")
 
     ## Functions
 
@@ -1546,6 +1811,7 @@ class VirtualMachine(vm_TRY_FINALLY):
     ## Importing
     def byte_IMPORT_NAME(self, name):
         level, fromlist = self.popn(2)
+        #print("1812:byte_IMPORT_NAME",name,level,fromlist)
         frame = self.frame
         self.push(__import__(name, frame.f_globals, frame.f_locals, fromlist, level))
 
@@ -1593,6 +1859,92 @@ async def async_run_code(vm, code, f_globals=None, f_locals=None):
     return val
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class vm_INTERFACE:
+
+    READY = False
+
+
+    exporter = 0
+
+    def export(self, fn, *argv, **kw):
+        VirtualMachine.exporter += 1
+        try:
+            sid = repr(fn)
+            native = VirtualMachine.AS_RES.pop(sid)
+            if asyncio.iscoroutinefunction(native._func):
+                print("289: exporting coro")
+                if len(argv):
+                    argv = list(argv)
+                    argv.insert(0, native._self)
+                    return native._func(*argv, **kw)
+                else:
+                    return native._func(native._self, **kw)
+            return native
+
+        finally:
+            VirtualMachine.exporter -= 1
+
+    def lock(self):
+        self.spinlock += 1
+
+    def unlock(self):
+        if self.spinlock > 0:
+            self.spinlock -= 1
+
+
+    def log(self, byteName, arguments, opoffset):
+        """ Log arguments, block stack, and data stack for each opcode."""
+        op = "%d: %s" % (opoffset, byteName)
+        if arguments:
+            op += " %r" % (arguments[0],)
+        indent = "    " * (len(self.frames) - 1)
+        stack_rep = repper(self.frame.stack)
+        block_stack_rep = repper(self.frame.block_stack)
+
+        log.info("  %sdata: %s" % (indent, stack_rep))
+        log.info("  %sblks: %s" % (indent, block_stack_rep))
+        log.info("%s%s" % (indent, op))
+
+
+
+
+
+
+
+
+
+class VirtualMachineError(Exception):
+    """For raising errors in the operation of the VM."""
+    pass
+
+
+class VirtualMachine(
+        vm_MODE,
+        vm_STACK,
+        vm_JUMPS,
+        vm_BLOCKS,
+        vm_TRY_FINALLY,
+        vm_CORE,
+        vm_PRINT,
+        vm_INTERFACE
+    ):
+    pass
+
+
 if __name__ == '__main__':
 
     main_mod = sys.modules['__main__']
@@ -1600,6 +1952,9 @@ if __name__ == '__main__':
     import os
     import sys
     import time
+
+    import pythons
+
 
     import asyncio
 
@@ -1617,7 +1972,7 @@ if __name__ == '__main__':
 
     # Execute the source file.
     vm = VirtualMachine()
-    builtins.exports = vm
+    aio.vm  = vm
 
     print("\n"*8)
     print(f"Welcome to Python{sys.version.split(' ',1)[0]}+1 async={vm.ASYNC}\n\n")

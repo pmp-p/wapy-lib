@@ -172,8 +172,8 @@ if not __UPY__:
             try:
                 import Applications
                 Applications.onCreate(Applications, python3)
-            except:
-                pass
+            except Exception as e:
+                sys.print_exception(e)
 
             if not __EMU__:
                 for k in os.environ:
@@ -196,22 +196,12 @@ else:
 
 import pythons.aio.plink
 
-
-
-
-# TODO: in case of failure to create "Application" load a safe template
+# TODO: in case of failure to create "Applications" load a safe template
 # that could display the previous tracebacks
 
 try:
     Applications
-    try:
-        from Applications import MainActivity
-        State = MainActivity.plink.CallPath.proxy
-    except Exception as e:
-        try:
-            sys.print_exception(e)
-        except:
-            embed.log("182: %r" % e )
+    State = MainActivity.plink.CallPath.proxy
 
 except:
 
@@ -222,33 +212,29 @@ except:
 
         @staticmethod
         def onCreate(self, pyvm):
-            print("onCreate", pyvm)
+            print("404:onCreate", pyvm)
         @staticmethod
         def onStart(self, pyvm):
-            print("onStart", pyvm)
+            print("404:onStart", pyvm)
         @staticmethod
         def onPause(self, pyvm):
-            print("onPause", pyvm)
+            print("404:onPause", pyvm)
         @staticmethod
         def onResume(self, pyvm):
-            print("onResume", pyvm)
+            print("404:onResume", pyvm)
         @staticmethod
         def onStop(self, pyvm):
-            print("onStop", pyvm)
+            print("404:onStop", pyvm)
         @staticmethod
         def onDestroy(self, pyvm):
-            print("onDestroy", pyvm)
+            print("404:onDestroy", pyvm)
 
     builtins.Applications = Applications
 
 try:
     State = pythons.aio.plink.CallPath.proxy
 except Exception as e:
-    try:
-        sys.print_exception(e)
-    except:
-        embed.log("190: %r" % e )
-
+    sys.print_exception(e)
 
 
 # =====================================================================
@@ -338,7 +324,7 @@ def onmouse(apps, p3, *in_queue ):
     oid, etype, cx, cy = in_queue
     clients = MainActivity.Events.ev.get(etype,{}).get(oid, [])
     if len(clients):
-        e = {'type':etype,'clientX':cx,'clientY':cy}
+        e = {'type':etype,'x':cx,'y':cy}
         for client in clients:
             client( e )
         print("dispatched !", e)

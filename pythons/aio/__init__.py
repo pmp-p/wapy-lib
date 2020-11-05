@@ -47,7 +47,7 @@ if __UPY__:
         print("WARNING: that Python implementation lacks aio_suspend()", file=sys.stderr)
 
         def suspend():
-            print("27: aio_suspend N/I")
+            print("50: aio_suspend N/I")
 
         builtins.aio_suspend = suspend
 
@@ -57,10 +57,11 @@ else:
     if __EMSCRIPTEN__:
 
         def websocket(*argv, **kw):
-            pdb("22: no async websocket provider")
+            from .upy.websocket import websocket
+            return websocket(*argv, **kw)
 
         def suspend():
-            raise Exception("unsupported - use a worker")
+            raise Exception("64: aio_suspend unsupported - use a worker")
 
     else:
 
@@ -70,12 +71,8 @@ else:
             return websocket(*argv, **kw)
 
         def suspend():
-            import aio_suspend
-
-            del sys.modules["aio_suspend"]
             Time.sleep(0.016)
 
-    # implementation lacks
     builtins.aio_suspend = suspend
 
 # mark not started but no error
@@ -88,6 +85,8 @@ pstab = {}
 
 # a green thread
 # FIXME: fix wapy BUG 882 so target can be None too in preempt mode
+
+# TODO: default granularity with https://docs.python.org/3/library/sys.html#sys.setswitchinterval
 
 
 class Thread:
@@ -112,14 +111,18 @@ class Thread:
                     self.name = "%s-%s" % (self.run.__name__, id(self))
                 except:
                     pass
+        else:
+            target = self
 
         if self.name is None:
             self.name = "%s-%s" % (self.__class__.__name__, id(self))
         self.status = None
 
+
     async def runner(self, coro):
         self.status = True
         try:
+            # TODO: pass thread local context here
             async with aio.ctx(self.slice).call(coro):
                 self.status = False
         except Exception as e:
@@ -146,7 +149,8 @@ class Thread:
                 self.delta = (rtc - self.last) - self.slice
                 if self.delta < 0:
                     self.delta = 0
-                yield from aio.sleep_ms(self.slice - int(self.delta / 2))
+                # no sleep_ms on cpy
+                yield from aio.sleep( float(self.slice - int(self.delta / 2)) / 1_000 )
                 self.last = rtc
 
     def rt(self, slice):
@@ -165,10 +169,10 @@ class Thread:
         return self
 
     def join(self):
-        embed.STI()
+        embed.enable_irq()
         while self.is_alive():
-            import aio_suspend
-        embed.CLI()
+            aio_suspend()
+        embed.disable_irq()
 
     def __bool__(self):
         return self.is_alive()
@@ -182,14 +186,24 @@ class Thread:
 
 
 def service(srv, *argv, **kw):
-    return aio.Thread(group=None, target=srv, args=argv, kwargs=kw).start()
+    embed.log(f"starting thread : {srv}")
+    thr =  aio.Thread(group=None, target=srv, args=argv, kwargs=kw).start()
+    srv.__await__ = thr.__await__
+    return pstab.setdefault(srv, thr  )
+
+def proc(srv):
+    return pstab.get(srv)
+
+class runnable:
+    def __await__(self):
+        yield from pstab.get(self).__await__()
 
 
 task = service
 create_task = loop.create_task
+paused = False
 
-
-def start(argv, env):
+def start(argv, env, **kw):
     global paused
     if aio.error is True:
         return pdb("80: aio can't start with uncleared error")
@@ -208,14 +222,13 @@ def start(argv, env):
         embed.log(f"run async main failed : {e}")
 
 
-# make cpython asyncio
+# cpython asyncio compat
 try:
     _shutdown
 except:
 
     def _shutdown(*argv, **kw):
         print("_shutdown")
-
 
 
 def run(main, **kw):
@@ -229,4 +242,5 @@ if __UPY__ and __EMSCRIPTEN__:
     except Exception as e:
         pdb("Failed to load browser support")
         sys.print_exception(e)
+
 

@@ -1,5 +1,7 @@
 
 class client:
+    OFFLINE = True
+
     def __init__(self,ip,port,ssl='',**kw):
         if ssl:ssl='s'
 
@@ -73,6 +75,7 @@ class client:
                 continue
 
             if case == 'ready':
+                client.OFFLINE = False
                 for cmd in (
                     "CAP LS",
                     "NICK {}".format((self.nick)),

@@ -147,7 +147,8 @@ def importer(name, *argv, **kw):
 
                         for test in (name , '%s/__init__' % name, '%s/%s' % (name,name) ):
                             filen = '{}/{}.py'.format( inzip_path, test )
-                            data = zf.read(filen)
+                            zf.open(filen)
+                            data = zf.read()
                             if data:
                                 print('tested',filen, len(data))
                                 break

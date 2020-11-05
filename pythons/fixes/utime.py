@@ -17,13 +17,25 @@ if not __UPY__: #sys.version_info[0:2]>(3,6):
 else:
     import embed
     import utime as _time
-
-    if embed.WAPY():
-        attr = ("time", "clock", "localtime")
+    if __WASM__:
         def sleep(t):
             print("No Sleep till Brooklyn")
+    if embed.WAPY():
+        attr = ("time", "clock", "localtime")
+        if __WASM__:
+            def sleep(t):
+                start = int( Time.time() * 1_000_000 )
+                stop = start + int( t * 1_000_000 )
+                embed.enable_irq()
+                while int(Time.time()*1_000_000) < stop:
+                    aio.suspend()
+                embed.disable_irq()
+                return None
+
     else:
         attr = ("time", "sleep", "clock", "localtime")
+
+
 
 for f in attr:
     globals()[f] = getattr(_time, f)

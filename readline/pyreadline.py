@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
-
-# """Incremental readline compatible with micropython/lib/readline.c, credits https://github.com/dhylands """
+# Incremental readline compatible with micropython/lib/readline.c, credits https://github.com/dhylands
 
 import sys
-
 
 try:
     import ulogging as logging

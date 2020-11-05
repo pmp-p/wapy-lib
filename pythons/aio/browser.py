@@ -1,5 +1,10 @@
 import pythons.aio.plink
 
+# https://developer.mozilla.org/en-US/docs/Web/API/Element/getAttribute
+# https://developer.mozilla.org/en-US/docs/Web/API/Element/hasAttribute
+# https://developer.mozilla.org/en-US/docs/Web/API/ParentNode/children
+
+
 #from pythons.aio.plink import window, CallPath, vm
 aiovmctl = aio.vm.aio.ctl
 

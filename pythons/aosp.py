@@ -1,6 +1,14 @@
 # pythons android support for flavours that implement sys.getandroidapilevel
 
 if not __UPY__:
+    import sys
+
+    todel = []
+    for i, elem in enumerate(sys.path):
+        if elem.startswith('/data/data/'):
+            todel.append(i)
+    while len(todel):
+        sys.path.pop( todel.pop() )
 
 
     # may only works for root shell access

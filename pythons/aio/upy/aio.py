@@ -129,7 +129,7 @@ async def Future(fildes, coro):
 
 def await_for(coro, tmout):
     global loop
-    embed.CLI()
+    embed.disable_irq()
     stop_at = int(Time.time() + tmout)
     fildes = id(coro)
     loop.create_task( Future(fildes, coro) )
@@ -139,12 +139,12 @@ def await_for(coro, tmout):
         if int(Time.time())>stop_at:
             print("136:await_for tmout")
             break
-    embed.STI()
+    embed.enable_irq()
     return lio.pop(fildes)
 
 def fsync(owner, coro, tmout ):
     global loop, lio, fds
-    embed.CLI()
+    embed.disable_irq()
     fildes = id(owner)
 
     # TODO: use a io handler queue that can be rewritten in C
@@ -157,7 +157,7 @@ def fsync(owner, coro, tmout ):
             pdb("116:aio_fsync tmout")
             break
 
-    embed.STI()
+    embed.enable_irq()
     result = lio.pop(fildes)
     if isinstance(result, Exception):
         raise result

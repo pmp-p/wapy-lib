@@ -4,7 +4,7 @@ import _zipfile
 
 def ZipFile(file, mode='r', compression=0, allowZip64=True, compresslevel=None, *, strict_timestamps=True):
     zf = _zipfile.ZipFile()
-    zf.open(file)
+    zf.init(file)
     return zf
 
 # usage : no autodetection of zip archives in sys.path yet, just pattern matching

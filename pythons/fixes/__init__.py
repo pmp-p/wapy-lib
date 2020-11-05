@@ -2,7 +2,6 @@ import sys
 import builtins
 
 
-
 # get  the real importer in case we are late fixing
 impattr = getattr( sys.modules.get('imp', __import__('builtins') ), '__import__' )
 
@@ -23,13 +22,12 @@ def fixme(name):
     return module
 
 # running micropython ~3.4
-if sys.version_info[:2]<(3,7):
+if __UPY__: # or sys.version_info[:2]<(3,7):
 
-    builtins.__UPY__ = True
+    #builtins.__UPY__ = True
 
     #important for __import__( . ) in fixme
     import pythons
-
 
     if sys.platform == 'wasm':
         fixes = ('struct', 'ctypes','utime')
