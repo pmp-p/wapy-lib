@@ -59,8 +59,6 @@ except:
     print("TODO: a select.poll() implementation is required for", sys.platform)
 
 
-
-
 if __EMSCRIPTEN__:
     import embed
 
@@ -116,22 +114,22 @@ failure = False
 # for io errors ( dom==gpu / websocket==socket  )
 io_error = False
 
-_event_loop = None
+loop = None
 
 
 def task(t, *argv, **kw):
-    global _event_loop
-    if _event_loop is None:
-        _event_loop = get_event_loop()
+    global loop
+    if loop is None:
+        loop = get_running_loop()
     print("about to start %s(*%r,**%r)" % (t.__name__, argv, kw))
-    _event_loop.create_task(t(*argv, **kw))
+    loop.create_task(t(*argv, **kw))
 
 
 def __auto__():
-    global _event_loop, auto
+    global loop, auto
     if auto:
         try:
-            return _event_loop.run_once()
+            return loop.run_once()
         except Exception as e:
             auto = None
             sys.print_exception(e)
@@ -356,11 +354,14 @@ class IOWriteDone(SysCall1):
 
 
 def get_event_loop():
-    global _event_loop
-    if _event_loop is None:
-        _event_loop = _event_loop_class(16, 16)
-    return _event_loop
+    global loop
+    if loop is None:
+        loop = _event_loop_class(16, 16)
+    return loop
 
+def get_running_loop():
+    global loop
+    return loop
 
 def sleep(secs):
     yield int(secs * 1000)
@@ -398,7 +399,7 @@ sleep_ms = SleepMs()
 
 def cancel(coro):
     if coro.pend_throw(CancelledError()) is False:
-        _event_loop.call_soon(coro)
+        loop.call_soon(coro)
 
 
 class TimeoutObj:
@@ -414,10 +415,10 @@ def wait_for_ms(coro, timeout):
 
     def timeout_func(timeout_obj):
         if timeout_obj.coro and (timeout_obj.coro.pend_throw(TimeoutError()) is False):
-            _event_loop.call_soon(timeout_obj.coro)
+            loop.call_soon(timeout_obj.coro)
 
-    timeout_obj = TimeoutObj(_event_loop.cur_task)
-    _event_loop.call_later_ms(timeout, timeout_func, timeout_obj)
+    timeout_obj = TimeoutObj(loop.cur_task)
+    loop.call_later_ms(timeout, timeout_func, timeout_obj)
     return (yield from waiter(coro, timeout_obj))
 
 
@@ -426,9 +427,9 @@ def wait_for(coro, timeout):
 
 
 # CPython asyncio incompatibility: Task is a function, not a class (for efficiency)
-def Task(coro, loop=_event_loop):
+def Task(coro, loop=loop):
     # Same as async()
-    _event_loop.call_soon(coro)
+    loop.call_soon(coro)
 
 
 class _event_loop_class(EventLoop):

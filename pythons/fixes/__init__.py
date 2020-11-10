@@ -2,6 +2,12 @@ import sys
 import builtins
 
 
+def byte(char):
+    return bytes( (char.encode()[0],) )
+
+builtins.byte = byte
+
+
 # get  the real importer in case we are late fixing
 impattr = getattr( sys.modules.get('imp', __import__('builtins') ), '__import__' )
 

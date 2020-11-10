@@ -282,7 +282,8 @@ class ReadLine(Mouse):
             CTRL_E: self.end,
             CTRL_U: self.clear_before_cursor,
             BS: self.backspace,
-            CR: self.line_complete,
+#            CR: self.line_complete,
+            LF: self.line_complete,
             ESC: self.esc,
             DEL: self.delete,
             None: self.typed_char,
@@ -387,17 +388,26 @@ class ReadLine(Mouse):
     # ============================================================================
 
     def backspace(self):
+        #embed.log("391:backspace caret=%s" % self.caret)
         if self.caret > 0:
             old_line_len = len(self.line)
             self.line = self.line[: self.caret - 1] + self.line[self.caret :]
-            self.caret -= 1
+            self.caret = self.caret - 1
             self.invalidate(self.caret, old_line_len)
 
     def delete(self):
-        if self.caret < len(self.line):
-            old_line_len = len(self.line)
-            self.line = self.line[: self.caret] + self.line[self.caret + 1 :]
+        embed.log("399:delete caret=%s line=%s" % (self.caret,len(self.line)) )
+        old_line_len = len(self.line)
+        if self.caret == len(self.line):
+            if self.caret==0:
+                return
+            self.line = self.line[: self.caret - 1] #+ self.line[self.caret :]
             self.invalidate(self.caret, old_line_len)
+        elif self.caret < len(self.line):
+            self.line = self.line[: self.caret -1 ] + self.line[self.caret :]
+            self.invalidate(self.caret, old_line_len)
+            if self.caret>0:
+                self.caret = self.caret -1
 
     # ============================================================================
 
@@ -530,21 +540,26 @@ class ReadLine(Mouse):
 
     def process_line(self, line):
         """Primarily for FBO. This basically runs a bunch of characters
-           through process_char followed by a CR.
+           through process_char followed by a LF.
         """
         self.process_str(line)
-        return self.process_char(CR)
+        return self.process_char(LF)
 
     def process_str(self, string):
         """Calls process_char for each character in the string."""
-        for byte in string:
-            self.process_char(bytes((byte,)))
+        for char in string:
+            self.process_char(char)
 
     def process_char(self, char):
         """Processes a single character of intput."""
         self.prev_line_len = len(self.line)
-        if char in self.state:
-            action = self.state[char]
+
+        # handle unicode bytes iteration int silly conversion
+        bchar = byte(char)
+
+        if bchar in self.state:
+
+            action = self.state[bchar]
             args = ()
         else:
             action = self.state[None]
@@ -564,12 +579,22 @@ class ReadLine(Mouse):
                 "process_char '%c' 0x%02x - Action %-20s caret = %2d line = %s esc_seq = '%s' (after)"
                 % (printable(char), ord(char), action.__name__, self.caret, repr(self.line), self.esc_seq),
             )
+        except Exception as e:
+            embed.log('576: %s' % e)
+            result = None
+
         self.redraw()
+
+
         if result is not None:
             self.write("\r\n")
             self.line = ""
             self.caret = 0
         self.write_queue.process()
+        if bchar == LF:
+            embed.log("LF! %s" % result)
+
+
         return result
 
     def redraw(self):
@@ -621,6 +646,8 @@ class ReadLine(Mouse):
         self.move_cursor_to_col(self.caret - self.line_start)
 
     def erase_line_from_cursor(self):
+        if FBO:
+            print("640: #FIXME:! FBO/erase_line_from_cursor")
         self.write("\x1b[K")
 
     def move_cursor_to_col(self, col):

@@ -69,6 +69,7 @@ if not __UPY__:
         # javascript stdio
         if __EMSCRIPTEN__:
             import binascii
+            import embed
 
             original_stderr_fd = sys.stderr.fileno()
             original_stdout_fd = sys.stdout.fileno()
@@ -94,13 +95,19 @@ if not __UPY__:
                     s = "".join(self.buf)
                     #s = s.replace("\n", "↲")  # ¶
                     #s = s.replace("\n", "↲\r\n")
+
+                    # line cooking
                     s = s.replace("\n", "\r\n")
                     if len(s):
+                        embed.demux_fd(1, s)
+                        #value = binascii.hexlify(s.encode('utf-8')).decode('utf-8')
+                        #embed.demux_fd(  json.dumps( { 1 : value } ) )
+
                         #embed.cout(f'"sys.{self.channel}" : "{s}"')
-                        value = binascii.hexlify(s.encode('utf-8')).decode('utf-8')
-                        sys.__stdout__.write( json.dumps( { 1 : value } ) )
-                        sys.__stdout__.write( "\n" )
-                        sys.__stdout__.flush()
+
+                        #sys.__stdout__.write( json.dumps( { 1 : value } ) )
+                        #sys.__stdout__.write( "\n" )
+                        #sys.__stdout__.flush()
                     self.buf.clear()
 
 

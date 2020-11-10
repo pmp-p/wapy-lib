@@ -150,7 +150,8 @@ class Thread:
                 if self.delta < 0:
                     self.delta = 0
                 # no sleep_ms on cpy
-                yield from aio.sleep( float(self.slice - int(self.delta / 2)) / 1_000 )
+                yield from aio.sleep_ms( float(self.slice - int(self.delta / 2)) / 1_000 ).__await__()
+                #return aio.sleep( float(self.slice - int(self.delta / 2)) / 1_000 )
                 self.last = rtc
 
     def rt(self, slice):
@@ -195,9 +196,16 @@ def proc(srv):
     return pstab.get(srv)
 
 class runnable:
+
     def __await__(self):
         yield from pstab.get(self).__await__()
 
+#        iter = pstab.get(self).__await__()
+#        while True:
+#            res = next(iter, undefined)
+#            if res is undefined:
+#                break
+#            yield res
 
 task = service
 create_task = loop.create_task

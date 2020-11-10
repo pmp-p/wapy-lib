@@ -113,21 +113,25 @@ class StreamWriter(OrgStreamWriter):
 
 asyncio.streams.StreamWriter = StreamWriter
 
+# also NameError before 3.8
 
-_event_loop = get_event_loop()
-
+# Within a coroutine, simply use `asyncio.get_running_loop()`, since the coroutine wouldn't be able
+# to execute in the first place without a running event loop present.
+try:
+    loop = get_running_loop()
+except RuntimeError:
+   # depending on context, you might debug or warning log that a running event loop wasn't found
+   loop = get_event_loop()
 
 def run_once(*argv,**kw):
-    global _event_loop
-    _event_loop.call_soon(_event_loop.stop)
-    _event_loop.run_forever()
+    global loop
+    loop.call_soon(loop.stop)
+    loop.run_forever()
 
-_event_loop.run_once = run_once
-
+loop.run_once = run_once
 
 async def sleep_ms(t):
     await sleep(float(t)/1_000)
 
 del run_once
-
 

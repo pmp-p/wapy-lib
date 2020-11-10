@@ -12,7 +12,7 @@ if not __UPY__:
 
 
     # may only works for root shell access
-    # sys.path.insert(0,"/data/data/{{ cookiecutter.bundle }}.{{ cookiecutter.module_name }}/usr/lib/python3.8/lib-dynload")
+    # sys.path.insert(0,"/data/data/{{ cookiecutter.bundle }}.{{ cookiecutter.module_name }}/usr/lib/python{{ cookiecutter.pyver }}/lib-dynload")
 
     # so use importlib
 
