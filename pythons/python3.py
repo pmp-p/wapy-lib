@@ -208,18 +208,24 @@ import pythons.aio.plink
 
 try:
     Applications
-    State = MainActivity.plink.CallPath.proxy
-
 except:
+    class MainActivity:
+
+        async def __main__(*self):
+            print("215: broken MainActivity.__main__")
+        async def test(*self):
+            print("217: broken MainActivity.test")
+
 
     class Applications:
 
-        # empty module
-        MainActivity = type(sys)('MainActivity')
+        MainActivity = MainActivity()
 
         @staticmethod
         def onCreate(self, pyvm):
             print("404:onCreate", pyvm)
+            # empty module
+
         @staticmethod
         def onStart(self, pyvm):
             print("404:onStart", pyvm)
@@ -236,17 +242,17 @@ except:
         def onDestroy(self, pyvm):
             print("404:onDestroy", pyvm)
 
-    builtins.Applications = Applications
+    del MainActivity
+
+builtins.Applications = Applications
 
 try:
-    State = pythons.aio.plink.CallPath.proxy
+    State = Applications.MainActivity.plink.CallPath.proxy
 except Exception as e:
+    State = pythons.aio.plink.CallPath.proxy
     sys.print_exception(e)
 
-
 # =====================================================================
-
-
 
 OneSec = time.Lapse(1)
 lastc = 0
@@ -329,7 +335,7 @@ def oncursor(apps, p3, e ):
 
 def onmouse(apps, p3, *in_queue ):
     oid, etype, cx, cy = in_queue
-    clients = MainActivity.Events.ev.get(etype,{}).get(oid, [])
+    clients = apps.MainActivity.Events.ev.get(etype,{}).get(oid, [])
     if len(clients):
         e = {'type':etype,'x':cx,'y':cy}
         for client in clients:
@@ -346,13 +352,13 @@ def on_step(apps, p3):
 
     if OneSec:
         wall_s += 1
-        if wall_s == 2 and not tested:
+        if wall_s == 5 and not tested:
             if os.path.isdir(f"assets/python{sys.version_info.major}.{sys.version_info.minor}/test"):
                 print("starting testsuite")
                 import test.__main__
             else:
                 embed.log("============= THE TEST : Begin =================")
-                aio.loop.create_task(MainActivity.__main__())
+                aio.loop.create_task(apps.MainActivity.test())
                 tested = True
 
         if wall_s == 10:

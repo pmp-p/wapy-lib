@@ -187,7 +187,7 @@ class Thread:
 
 
 def service(srv, *argv, **kw):
-    embed.log(f"starting thread : {srv}")
+    embed.log(f"starting green thread : {srv}")
     thr =  aio.Thread(group=None, target=srv, args=argv, kwargs=kw).start()
     srv.__await__ = thr.__await__
     return pstab.setdefault(srv, thr  )
@@ -200,15 +200,7 @@ class runnable:
     def __await__(self):
         yield from pstab.get(self).__await__()
 
-#        iter = pstab.get(self).__await__()
-#        while True:
-#            res = next(iter, undefined)
-#            if res is undefined:
-#                break
-#            yield res
-
 task = service
-create_task = loop.create_task
 paused = False
 
 def start(argv, env, **kw):
@@ -240,7 +232,9 @@ except:
 
 
 def run(main, **kw):
-    loop.create_task(main)
+    global loop
+    # TODO: kw.get('debug',False)
+    loop.create_task(main, name=main.__name__)
     aio.error = False
 
 
@@ -252,3 +246,7 @@ if __UPY__ and __EMSCRIPTEN__:
         sys.print_exception(e)
 
 
+def create_task(coro,**kw):
+    global loop
+    # TODO: expand name to fq name
+    loop.create_task(coro, name=kw.get('name',coro.__name__))
